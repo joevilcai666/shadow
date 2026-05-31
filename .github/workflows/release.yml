@@ -1,0 +1,68 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build-and-release:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        run: cd web && npm ci
+
+      - name: Build web assets
+        run: cd web && npm run build
+
+      - name: Copy web dist to server static
+        run: cp -r web/dist/* internal/server/static/
+
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build for darwin/arm64
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+        run: |
+          go build -ldflags "-X github.com/joevilcai666/shadow/shadow.Version=${{ steps.version.outputs.VERSION }}" \
+            -o shadow-darwin-arm64 ./cmd/shadow/
+
+      - name: Build for darwin/amd64
+        env:
+          GOOS: darwin
+          GOARCH: amd64
+        run: |
+          go build -ldflags "-X github.com/joevilcai666/shadow/shadow.Version=${{ steps.version.outputs.VERSION }}" \
+            -o shadow-darwin-amd64 ./cmd/shadow/
+
+      - name: Create Checksums
+        run: |
+          shasum -a 256 shadow-darwin-arm64 > checksums.txt
+          shasum -a 256 shadow-darwin-amd64 >> checksums.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            shadow-darwin-arm64
+            shadow-darwin-amd64
+            checksums.txt
+          generate_release_notes: true
