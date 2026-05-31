@@ -1,0 +1,39 @@
+# Binaries
+/shadow
+/shadow-*
+*.exe
+
+# Build output
+/dist/
+/bin/
+
+# Go
+vendor/
+
+# Node
+web/node_modules/
+web/dist/
+web/.vite/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config
+*.local
+.env
+.env.*
+
+# Data
+*.db
+*.db-journal
+*.db-wal
+.shadow/
+go.work
