@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "0ac6904d",
+      "cron": "0 9 * * *",
+      "prompt": "搜索并总结过去 24 小时内关于 AI memory / LLM long-term memory / Agent memory / vector memory / persistent memory 的最新新闻、研究论文和竞品更新。重点覆盖 OpenAI、Anthropic、Google、Meta、LangChain、LangGraph、Mem0、MemU、MemOS、Hindsight、Pinecone、Weaviate、Neo4j 等竞品，以及最新 arXiv 论文。输出格式：1. 标题 + 关键发现；2. 链接；3. 对竞品影响评估。把每天跑的结果放在一个新的md格式文件里",
+      "createdAt": 1780234103737,
+      "recurring": true,
+      "createdBySessionId": "ae1dfaf3-bbe0-45b5-9da0-8d2a76536517",
+      "createdByPid": 5228,
+      "createdByProcStart": "Sun May 31 05:11:09 2026"
+    }
+  ]
+}
