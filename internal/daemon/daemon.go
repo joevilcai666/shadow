@@ -2,15 +2,21 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/joevilcai666/shadow/internal/config"
+	apiserver "github.com/joevilcai666/shadow/internal/server"
+	"github.com/joevilcai666/shadow/internal/storage"
 )
 
 // State represents the daemon's current state in its lifecycle.
@@ -35,7 +41,9 @@ type Daemon struct {
 	logDir   string
 	homeDir  string
 
-	sockServer *SocketServer
+	sockServer  *SocketServer
+	httpServer  *http.Server
+	db          *sql.DB
 
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -98,7 +106,41 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	defer d.sockServer.Close()
 
-	slog.Info("shadow daemon started", "version", d.version, "socket", d.sockPath)
+	// Open database.
+	dbPath := filepath.Join(d.homeDir, "shadow.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		return fmt.Errorf("open database: %w", err)
+	}
+	defer db.Close()
+	d.db = db
+
+	// Load config.
+	cfgMgr := config.NewManager(d.homeDir)
+	cfgMgr.LoadGlobal()
+
+	// Start HTTP API server.
+	httpSrv := apiserver.New(
+		storage.NewRuleRepo(db),
+		storage.NewSourceRepo(db),
+		storage.NewVersionRepo(db),
+		storage.NewConfigRepo(db),
+		storage.NewProjectRepo(db),
+		cfgMgr,
+		config.ServerConfig{Port: 7878, Bind: "127.0.0.1"},
+	)
+
+	d.httpServer = &http.Server{
+		Addr:    "127.0.0.1:7878",
+		Handler: httpSrv,
+	}
+	go func() {
+		if err := d.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("HTTP server error", "error", err)
+		}
+	}()
+
+	slog.Info("shadow daemon started", "version", d.version, "socket", d.sockPath, "http", "localhost:7878")
 
 	// Handle signals.
 	sigCh := make(chan os.Signal, 1)
@@ -170,6 +212,13 @@ func (d *Daemon) shutdown() error {
 	slog.Info("daemon shutting down gracefully")
 
 	d.SetState(StateStopping)
+
+	// Shutdown HTTP server.
+	if d.httpServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		d.httpServer.Shutdown(ctx)
+	}
 
 	// Give ongoing operations up to 10s to finish.
 	timeout := time.After(10 * time.Second)

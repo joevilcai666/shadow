@@ -73,6 +73,11 @@ func (s *Server) Start() error {
 	return http.ListenAndServe(addr, s.router)
 }
 
+// ServeHTTP implements http.Handler, delegating to the gorilla mux router.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.router.ServeHTTP(w, r)
+}
+
 func (s *Server) routes() {
 	api := s.router.PathPrefix("/api").Subrouter()
 	api.Use(localhostOnly)
