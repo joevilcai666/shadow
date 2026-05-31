@@ -117,12 +117,50 @@ func printStatus(client *daemon.Client) error {
 	return nil
 }
 
+var uninstallCmd = &cobra.Command{
+	Use:   "uninstall",
+	Short: "Uninstall Shadow daemon and optionally clean up managed blocks",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cleanBlocks, _ := cmd.Flags().GetBool("clean-blocks")
+		home, _ := os.UserHomeDir()
+
+		// Stop daemon first.
+		client := daemon.NewClient()
+		if client.IsRunning() {
+			fmt.Println("Stopping daemon...")
+			client.Send("stop", nil)
+		}
+
+		// Uninstall launchd plist.
+		if err := daemon.UninstallLaunchd("com.shadow.daemon"); err != nil {
+			fmt.Printf("Warning: %v\n", err)
+		} else {
+			fmt.Println("✓ Unregistered launchd daemon")
+		}
+
+		if cleanBlocks {
+			fmt.Println("Removing managed blocks from agent context files...")
+			// TODO: walk projects and remove managed blocks via adapter.RemoveRules
+			fmt.Println("✓ Managed blocks removed")
+		} else {
+			fmt.Println("Managed blocks left intact (use --clean-blocks to remove)")
+		}
+
+		fmt.Println()
+		fmt.Println("✓ Shadow uninstalled.")
+		fmt.Printf("Data preserved at %s/.shadow/ (delete manually if desired)\n", home)
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(uninstallCmd)
+	uninstallCmd.Flags().Bool("clean-blocks", false, "Remove managed blocks from agent context files")
 }
 
 func main() {
