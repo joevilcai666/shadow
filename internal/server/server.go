@@ -12,6 +12,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"github.com/joevilcai666/shadow/internal/adapter"
 	"github.com/joevilcai666/shadow/internal/config"
 	"github.com/joevilcai666/shadow/internal/storage"
 )
@@ -30,6 +31,7 @@ type Server struct {
 	router      *mux.Router
 	wsHub       *WebSocketHub
 	cfg         config.ServerConfig
+	mcpServer   *adapter.MCPServer
 }
 
 // New creates a new HTTP server.
@@ -41,6 +43,7 @@ func New(
 	projectRepo *storage.ProjectRepo,
 	configMgr *config.Manager,
 	cfg config.ServerConfig,
+	mcpServer *adapter.MCPServer,
 ) *Server {
 	s := &Server{
 		ruleRepo:    ruleRepo,
@@ -52,6 +55,7 @@ func New(
 		router:      mux.NewRouter(),
 		wsHub:       NewWebSocketHub(),
 		cfg:         cfg,
+		mcpServer:   mcpServer,
 	}
 	s.routes()
 	return s
@@ -111,6 +115,12 @@ func (s *Server) routes() {
 
 	// WebSocket
 	s.router.HandleFunc("/ws", s.handleWebSocket)
+
+	// MCP server routes — mount under /mcp prefix.
+	if s.mcpServer != nil {
+		mcp := s.router.PathPrefix("/mcp").Subrouter()
+		mcp.PathPrefix("/").Handler(s.mcpServer.Handler())
+	}
 
 	// Static files (SPA) — must be last.
 	s.router.PathPrefix("/").Handler(s.spaHandler())

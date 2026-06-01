@@ -1,4 +1,4 @@
-.PHONY: build dev test lint clean web-build web-dev
+.PHONY: build dev test lint clean web-build web-dev release install version
 
 # Build variables
 BINARY_NAME := shadow
@@ -48,6 +48,18 @@ web-dev:
 web-build:
 	@if [ ! -d web/node_modules ]; then cd web && npm install; fi
 	cd web && npm run build
+
+## install: Install shadow to /usr/local/bin
+install: build
+	cp $(BINARY_NAME) /usr/local/bin/shadow
+	@echo "Installed shadow $(VERSION) to /usr/local/bin/shadow"
+
+## release: Create a git tag and push to trigger GoReleaser
+release:
+	@if [ -z "$(v)" ]; then echo "Usage: make release v=X.Y.Z"; exit 1; fi
+	git tag -a v$(v) -m "Release v$(v)"
+	git push origin v$(v)
+	@echo "Pushed tag v$(v) — GoReleaser will build and publish."
 
 ## version: Print current version
 version:

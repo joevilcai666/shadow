@@ -1,0 +1,72 @@
+version: 2
+
+before:
+  hooks:
+    - make web-build
+
+builds:
+  - id: shadow
+    main: ./cmd/shadow/
+    binary: shadow
+    env:
+      - CGO_ENABLED=1
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/joevilcai666/shadow.Version={{.Version}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "arm64" }}arm64
+      {{- else }}{{ .Arch }}{{ end }}
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "merge conflict"
+
+brews:
+  - name: shadow
+    repository:
+      owner: joevilcai666
+      name: homebrew-shadow
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/joevilcai666/shadow"
+    description: "AI agent memory layer — capture corrections, create persistent rules across all your coding tools"
+    license: MIT
+    test: |
+      system "#{bin}/shadow version"
+    install: |
+      bin.install "shadow"
+
+release:
+  github:
+    owner: joevilcai666
+    name: shadow
+  draft: false
+  prerelease: auto
+  mode: replace

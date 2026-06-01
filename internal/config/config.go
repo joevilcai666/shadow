@@ -39,9 +39,11 @@ type PrivacyConfig struct {
 
 // DistillConfig controls the rule distillation engine.
 type DistillConfig struct {
-	Threshold        string `yaml:"threshold"`
-	AutoActivateLowRisk bool  `yaml:"auto_activate_low_risk"`
-	BatchMode        bool   `yaml:"batch_mode"`
+	Threshold            string `yaml:"threshold"`
+	AutoActivateLowRisk  bool   `yaml:"auto_activate_low_risk"`
+	BatchMode            bool   `yaml:"batch_mode"`
+	LLMAPIKey            string `yaml:"llm_api_key"`
+	LLMModel             string `yaml:"llm_model"`
 }
 
 // AdaptersConfig configures which agent adapters are active.
@@ -105,6 +107,7 @@ func DefaultConfig() *Config {
 			Threshold:          "medium",
 			AutoActivateLowRisk: true,
 			BatchMode:          false,
+			LLMModel:           "claude-sonnet-4-20250514",
 		},
 		Adapters: AdaptersConfig{
 			ClaudeCode: AdapterConfig{Enabled: true, GlobalPath: "~/.claude/CLAUDE.md"},

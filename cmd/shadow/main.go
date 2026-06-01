@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 
 	"github.com/joevilcai666/shadow"
 	"github.com/joevilcai666/shadow/internal/daemon"
@@ -66,9 +67,11 @@ var startCmd = &cobra.Command{
 		}
 		fmt.Println("✓ Shadow daemon registered with launchd")
 
-		// Start via launchd.
+		// Start via launchctl.
 		fmt.Println("Starting daemon...")
-		// launchctl load would go here; for now start foreground in goroutine concept.
+		if err := daemon.LoadLaunchd("com.shadow.daemon"); err != nil {
+			return fmt.Errorf("start daemon: %w", err)
+		}
 		fmt.Println("✓ Shadow daemon started")
 		fmt.Println()
 		fmt.Printf("Shadow %s — ready!\n", shadow.Version)
@@ -83,12 +86,21 @@ var stopCmd = &cobra.Command{
 	Short: "Stop the Shadow daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client := daemon.NewClient()
+		if !client.IsRunning() {
+			fmt.Println("Shadow daemon is not running.")
+			return nil
+		}
 		resp, err := client.Send("stop", nil)
 		if err != nil {
 			return fmt.Errorf("stop daemon: %w", err)
 		}
-		fmt.Println("✓ Shadow daemon stopping...")
 		_ = resp
+
+		// Unload from launchd so it does not restart (KeepAlive=true).
+		if err := daemon.UnloadLaunchd("com.shadow.daemon"); err != nil {
+			fmt.Printf("Warning: %v\n", err)
+		}
+		fmt.Println("✓ Shadow daemon stopped")
 		return nil
 	},
 }
@@ -152,6 +164,15 @@ var uninstallCmd = &cobra.Command{
 		return nil
 	},
 }
+var openCmd = &cobra.Command{
+	Use:   "open",
+	Short: "Open the Shadow web console in browser",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		url := "http://localhost:7878"
+		fmt.Printf("Opening Shadow console at %s\n", url)
+		return exec.Command("open", url).Start()
+	},
+}
 
 func init() {
 	rootCmd.AddCommand(versionCmd)
@@ -160,6 +181,7 @@ func init() {
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(uninstallCmd)
+	rootCmd.AddCommand(openCmd)
 	uninstallCmd.Flags().Bool("clean-blocks", false, "Remove managed blocks from agent context files")
 }
 

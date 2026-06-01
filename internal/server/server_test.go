@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/gorilla/mux"
+	"github.com/joevilcai666/shadow/internal/adapter"
 	"github.com/joevilcai666/shadow/internal/config"
 	"github.com/joevilcai666/shadow/internal/storage"
 )
@@ -44,6 +45,7 @@ func testEnv(t *testing.T) (*Server, *sql.DB) {
 		storage.NewProjectRepo(db),
 		cfgMgr,
 		config.ServerConfig{Port: 7878, Bind: "127.0.0.1"},
+		adapter.NewMCPServer(storage.NewRuleRepo(db)),
 	)
 	return s, db
 }
@@ -241,5 +243,25 @@ func TestLocalhostOnly(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Errorf("non-localhost should be 403, got %d", w.Code)
+	}
+}
+
+func TestMCPRoutesMounted(t *testing.T) {
+	s, _ := testEnv(t)
+
+	// MCP tools list endpoint should be reachable under /mcp/tools.
+	req := newLocalRequest("GET", "/mcp/tools", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("MCP tools status: %d, body: %s", w.Code, w.Body.String())
+	}
+
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+	tools, ok := resp["tools"].([]any)
+	if !ok || len(tools) == 0 {
+		t.Error("MCP tools should return non-empty tools list")
 	}
 }
