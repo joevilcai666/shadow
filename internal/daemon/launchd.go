@@ -3,6 +3,7 @@ package daemon
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"text/template"
 )
@@ -86,4 +87,26 @@ func UninstallLaunchd(label string) error {
 // LaunchdPlistPath returns the expected plist file path.
 func LaunchdPlistPath(label string) string {
 	return filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", label+".plist")
+}
+
+// LoadLaunchd loads and starts the daemon via launchctl.
+func LoadLaunchd(label string) error {
+	plistPath := LaunchdPlistPath(label)
+
+	// Unload first in case of stale registration.
+	exec.Command("launchctl", "unload", plistPath).Run() // Ignore error — may not be loaded.
+
+	if err := exec.Command("launchctl", "load", plistPath).Run(); err != nil {
+		return fmt.Errorf("launchctl load: %w", err)
+	}
+	return nil
+}
+
+// UnloadLaunchd stops and unloads the daemon via launchctl.
+func UnloadLaunchd(label string) error {
+	plistPath := LaunchdPlistPath(label)
+	if err := exec.Command("launchctl", "unload", plistPath).Run(); err != nil {
+		return fmt.Errorf("launchctl unload: %w", err)
+	}
+	return nil
 }

@@ -14,7 +14,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joevilcai666/shadow/internal/adapter"
+	"github.com/joevilcai666/shadow/internal/capture"
 	"github.com/joevilcai666/shadow/internal/config"
+	"github.com/joevilcai666/shadow/internal/distill"
 	apiserver "github.com/joevilcai666/shadow/internal/server"
 	"github.com/joevilcai666/shadow/internal/storage"
 )
@@ -41,9 +44,11 @@ type Daemon struct {
 	logDir   string
 	homeDir  string
 
-	sockServer  *SocketServer
-	httpServer  *http.Server
-	db          *sql.DB
+	sockServer   *SocketServer
+	httpServer   *http.Server
+	db           *sql.DB
+	captureEngine *capture.Engine
+	distillEngine *distill.Engine
 
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -120,14 +125,18 @@ func (d *Daemon) Run(ctx context.Context) error {
 	cfgMgr.LoadGlobal()
 
 	// Start HTTP API server.
+	ruleRepo := storage.NewRuleRepo(db)
+	mcpServer := adapter.NewMCPServer(ruleRepo)
+
 	httpSrv := apiserver.New(
-		storage.NewRuleRepo(db),
+		ruleRepo,
 		storage.NewSourceRepo(db),
 		storage.NewVersionRepo(db),
 		storage.NewConfigRepo(db),
 		storage.NewProjectRepo(db),
 		cfgMgr,
 		config.ServerConfig{Port: 7878, Bind: "127.0.0.1"},
+		mcpServer,
 	)
 
 	d.httpServer = &http.Server{
@@ -139,6 +148,31 @@ func (d *Daemon) Run(ctx context.Context) error {
 			slog.Error("HTTP server error", "error", err)
 		}
 	}()
+
+	// Start capture engine (reuses ruleRepo from HTTP server setup).
+	sourceRepo := storage.NewSourceRepo(db)
+	d.captureEngine = capture.NewEngine(cfgMgr, sourceRepo, ruleRepo, d.homeDir)
+	d.captureEngine.RegisterParser(capture.NewClaudeCodeParser())
+
+	// Start distill engine â use LLM if API key configured, else rule-based.
+	var distiller distill.Distiller
+	if apiKey := cfgMgr.Get().Distill.LLMAPIKey; apiKey != "" {
+		slog.Info("using LLM distiller", "model", cfgMgr.Get().Distill.LLMModel)
+		distiller = distill.NewLLMDistiller(apiKey, cfgMgr.Get().Distill.LLMModel)
+	} else {
+		slog.Info("using rule-based distiller (no LLM API key configured)")
+		distiller = distill.NewRuleBasedDistiller()
+	}
+	d.distillEngine = distill.NewEngine(distiller, ruleRepo, sourceRepo, cfgMgr.Get().Distill.Threshold)
+
+	if cfgMgr.Get().Capture.Enabled {
+		if err := d.captureEngine.Start(ctx); err != nil {
+			slog.Warn("capture engine start failed (non-fatal)", "error", err)
+		} else {
+			d.SetState(StateCapturing)
+			slog.Info("capture engine started")
+		}
+	}
 
 	slog.Info("shadow daemon started", "version", d.version, "socket", d.sockPath, "http", "localhost:7878")
 
@@ -225,7 +259,11 @@ func (d *Daemon) shutdown() error {
 	done := make(chan struct{})
 
 	go func() {
-		// TODO: Wait for capture/distill/write pipelines to finish.
+		// Stop capture engine.
+		if d.captureEngine != nil {
+			d.captureEngine.Stop()
+			slog.Info("capture engine stopped")
+		}
 		close(done)
 	}()
 
