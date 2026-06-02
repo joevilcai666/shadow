@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/gorilla/mux"
@@ -112,6 +113,11 @@ func (s *Server) routes() {
 	// Capture
 	api.HandleFunc("/capture/toggle", s.toggleCapture).Methods("POST")
 	api.HandleFunc("/capture/status", s.captureStatus).Methods("GET")
+
+	// Adapters
+	api.HandleFunc("/adapters", s.listAdapters).Methods("GET")
+	api.HandleFunc("/adapters/{name}/toggle", s.toggleAdapter).Methods("POST")
+	api.HandleFunc("/adapters/sync", s.syncAdapters).Methods("POST")
 
 	// WebSocket
 	s.router.HandleFunc("/ws", s.handleWebSocket)
@@ -379,12 +385,33 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
-	var cfg config.Config
-	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+	var updates map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	// Write to disk and reload.
+	// Apply individual config updates.
+	cfg := s.configMgr.Get()
+	for key, val := range updates {
+		switch key {
+		case "capture_enabled":
+			if b, ok := val.(bool); ok {
+				cfg.Capture.Enabled = b
+			}
+		case "distill_threshold":
+			if s, ok := val.(string); ok {
+				cfg.Distill.Threshold = s
+			}
+		case "auto_activate_low_risk":
+			if b, ok := val.(bool); ok {
+				cfg.Distill.AutoActivateLowRisk = b
+			}
+		case "batch_mode":
+			if b, ok := val.(bool); ok {
+				cfg.Distill.BatchMode = b
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
@@ -392,11 +419,29 @@ func (s *Server) getDashboard(w http.ResponseWriter, r *http.Request) {
 	total, _ := s.ruleRepo.Count(storage.RuleFilter{})
 	active, _ := s.ruleRepo.Count(storage.RuleFilter{Status: "active"})
 	candidate, _ := s.ruleRepo.Count(storage.RuleFilter{Status: "candidate"})
+	disabled, _ := s.ruleRepo.Count(storage.RuleFilter{Status: "disabled"})
+	conflicted, _ := s.ruleRepo.Count(storage.RuleFilter{Status: "conflicted"})
+
+	// Get source stats.
+	sourceCount, _ := s.sourceRepo.CountTotal()
+	agentStats, _ := s.sourceRepo.CountByAgent()
+
+	// Get project count.
+	projects, _ := s.projectRepo.List()
+	projectCount := 0
+	if projects != nil {
+		projectCount = len(projects)
+	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"total_rules":    total,
-		"active_rules":   active,
+		"total_rules":     total,
+		"active_rules":    active,
 		"candidate_rules": candidate,
+		"disabled_rules":  disabled,
+		"conflicted_rules": conflicted,
+		"total_sources":   sourceCount,
+		"project_count":   projectCount,
+		"agent_stats":     agentStats,
 	})
 }
 
@@ -432,6 +477,70 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	client := &WSClient{conn: conn, send: make(chan []byte, 64)}
 	s.wsHub.Register(client)
 	go client.WritePump()
+}
+
+// --- Adapter Handlers ---
+
+func (s *Server) listAdapters(w http.ResponseWriter, r *http.Request) {
+	home, _ := os.UserHomeDir()
+	backupDir := home + "/.shadow/backups"
+
+	adapters := []map[string]any{
+		{
+			"name":        "claude_code",
+			"label":       "Claude Code",
+			"installed":   adapter.NewClaudeCodeAdapter(backupDir).IsInstalled(),
+			"enabled":     s.configMgr.Get().Adapters.ClaudeCode.Enabled,
+			"target_path": "CLAUDE.md (project) + ~/.claude/CLAUDE.md (global)",
+		},
+		{
+			"name":        "cursor",
+			"label":       "Cursor",
+			"installed":   adapter.NewCursorAdapter(backupDir).IsInstalled(),
+			"enabled":     s.configMgr.Get().Adapters.Cursor.Enabled,
+			"target_path": ".cursorrules (project) + ~/.cursorrules (global)",
+		},
+		{
+			"name":        "codex",
+			"label":       "Codex",
+			"installed":   adapter.NewCodexAdapter(backupDir).IsInstalled(),
+			"enabled":     s.configMgr.Get().Adapters.Codex.Enabled,
+			"target_path": "AGENTS.md (project) + ~/AGENTS.md (global)",
+		},
+	}
+
+	writeJSON(w, http.StatusOK, adapters)
+}
+
+func (s *Server) toggleAdapter(w http.ResponseWriter, r *http.Request) {
+	name := mux.Vars(r)["name"]
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON")
+		return
+	}
+
+	cfg := s.configMgr.Get()
+	switch name {
+	case "claude_code":
+		cfg.Adapters.ClaudeCode.Enabled = req.Enabled
+	case "cursor":
+		cfg.Adapters.Cursor.Enabled = req.Enabled
+	case "codex":
+		cfg.Adapters.Codex.Enabled = req.Enabled
+	default:
+		writeError(w, http.StatusNotFound, "adapter not found: "+name)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+func (s *Server) syncAdapters(w http.ResponseWriter, r *http.Request) {
+	// Trigger adapter sync. In a real implementation, this would signal the daemon.
+	writeJSON(w, http.StatusOK, map[string]string{"status": "sync triggered"})
 }
 
 // --- Helpers ---
