@@ -1,0 +1,26 @@
+- generic [ref=e4]:
+  - generic [ref=e5]:
+    - generic [ref=e6]:
+      - generic [ref=e7]: 👻
+      - generic [ref=e8]: Shadow
+    - button "Skip to Console →" [ref=e14]
+  - generic [ref=e15]:
+    - heading "Review Your Initial Memories" [level=1] [ref=e16]
+    - paragraph [ref=e17]: We found 1 candidate rules from your project. Select which ones to activate.
+    - generic [ref=e18]:
+      - heading "📁 Project Rules (1)" [level=3] [ref=e19]
+      - generic [ref=e22] [cursor=pointer]:
+        - img [ref=e23]
+        - generic [ref=e26]:
+          - paragraph [ref=e27]: "Test framework: go test (standard Go testing)"
+          - generic [ref=e28]:
+            - generic [ref=e29]: testing
+            - generic [ref=e30]: "confidence: 85%"
+            - generic [ref=e31]: testing
+    - generic [ref=e32]:
+      - button "Skip review" [ref=e33]:
+        - img [ref=e34]
+        - text: Skip review
+      - button "Activate Selected (1)" [ref=e36]:
+        - text: Activate Selected (1)
+        - img [ref=e37]

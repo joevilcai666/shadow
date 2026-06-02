@@ -1,0 +1,130 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - link "👻 Shadow" [ref=e6] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e7]: 👻
+        - generic [ref=e8]: Shadow
+      - paragraph [ref=e9]: AI Agent Memory Layer
+    - navigation [ref=e10]:
+      - link "Dashboard" [ref=e11] [cursor=pointer]:
+        - /url: /
+        - img [ref=e12]
+        - generic [ref=e14]: Dashboard
+      - link "Rules" [ref=e15] [cursor=pointer]:
+        - /url: /rules
+        - img [ref=e16]
+        - generic [ref=e19]: Rules
+      - link "Review 1" [ref=e20] [cursor=pointer]:
+        - /url: /review
+        - img [ref=e21]
+        - generic [ref=e24]: Review
+        - generic [ref=e25]: "1"
+      - link "Conflicts" [ref=e26] [cursor=pointer]:
+        - /url: /conflicts
+        - img [ref=e27]
+        - generic [ref=e29]: Conflicts
+      - link "Projects" [ref=e30] [cursor=pointer]:
+        - /url: /projects
+        - img [ref=e31]
+        - generic [ref=e33]: Projects
+      - link "Settings" [ref=e34] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e35]
+        - generic [ref=e38]: Settings
+    - generic [ref=e39]:
+      - generic [ref=e40]:
+        - img [ref=e41]
+        - text: Daemon Running
+      - paragraph [ref=e43]: localhost:7878 · local mode
+  - main [ref=e44]:
+    - generic [ref=e45]:
+      - heading "Settings" [level=1] [ref=e47]
+      - generic [ref=e48]:
+        - generic [ref=e49]:
+          - generic [ref=e50]:
+            - img [ref=e51]
+            - heading "Capture" [level=2] [ref=e54]
+          - paragraph [ref=e55]: Control how Shadow captures your corrections.
+          - generic [ref=e56]:
+            - generic [ref=e57]:
+              - generic [ref=e58]:
+                - text: Capture Enabled
+                - paragraph [ref=e59]: Watch agent logs for correction signals
+              - button [ref=e60]
+            - generic [ref=e62]:
+              - generic [ref=e63]: Batch Mode
+              - button [ref=e64]
+        - generic [ref=e66]:
+          - generic [ref=e67]:
+            - img [ref=e68]
+            - heading "Distillation" [level=2] [ref=e70]
+          - paragraph [ref=e71]: How corrections become rules.
+          - generic [ref=e72]:
+            - generic [ref=e73]:
+              - generic [ref=e74]: Threshold
+              - combobox [ref=e75]:
+                - option "Low (1 signal)"
+                - option "Medium (2 signals)" [selected]
+                - option "High (5 signals)"
+            - generic [ref=e76]:
+              - generic [ref=e77]:
+                - text: Auto-activate Low Risk
+                - paragraph [ref=e78]: Automatically activate high-confidence rules
+              - button [ref=e79]
+        - generic [ref=e81]:
+          - generic [ref=e82]:
+            - img [ref=e83]
+            - heading "Adapters" [level=2] [ref=e88]
+          - paragraph [ref=e89]: Connected coding agents.
+          - generic [ref=e90]:
+            - generic [ref=e91]:
+              - generic [ref=e92]:
+                - text: Claude Code
+                - paragraph [ref=e93]: CLAUDE.md (project) + ~/.claude/CLAUDE.md (global)
+              - generic [ref=e94]:
+                - button [ref=e95]
+                - generic [ref=e97]: Active
+            - generic [ref=e98]:
+              - generic [ref=e99]:
+                - text: Cursor
+                - paragraph [ref=e100]: .cursorrules (project) + ~/.cursorrules (global)
+              - generic [ref=e102]: Not Detected
+            - generic [ref=e103]:
+              - generic [ref=e104]:
+                - text: Codex
+                - paragraph [ref=e105]: AGENTS.md (project) + ~/AGENTS.md (global)
+              - generic [ref=e106]:
+                - button [ref=e107]
+                - generic [ref=e109]: Active
+          - button "Sync All Now" [ref=e110]
+        - generic [ref=e111]:
+          - generic [ref=e112]:
+            - img [ref=e113]
+            - heading "Privacy & Trust" [level=2] [ref=e115]
+          - paragraph [ref=e116]: What Shadow never stores.
+          - generic [ref=e117]:
+            - generic [ref=e118]:
+              - generic [ref=e119]: Block Keys/Tokens
+              - generic [ref=e120]: Always on
+            - generic [ref=e121]:
+              - generic [ref=e122]: Store Raw Conversations
+              - generic [ref=e123]: Never
+            - generic [ref=e124]:
+              - generic [ref=e125]: Only Distilled Rules
+              - generic [ref=e126]: "Yes"
+            - generic [ref=e127]:
+              - generic [ref=e128]: Exclude Patterns
+              - generic [ref=e129]: 6 patterns configured
+            - generic [ref=e130]:
+              - generic [ref=e131]: Deny Patterns
+              - generic [ref=e132]: 3 patterns active
+            - generic [ref=e133]:
+              - generic [ref=e134]: Data Location
+              - generic [ref=e135]: ~/.shadow/ (local only)
+        - generic [ref=e136]:
+          - paragraph [ref=e137]: Shadow v0.1.0 — Local-first, your data stays yours.
+          - paragraph [ref=e138]:
+            - text: Run
+            - code [ref=e139]: shadow uninstall --clean-blocks
+            - text: to remove all traces.

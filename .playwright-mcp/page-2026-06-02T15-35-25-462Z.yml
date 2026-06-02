@@ -1,0 +1,133 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - link "👻 Shadow" [ref=e6] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e7]: 👻
+        - generic [ref=e8]: Shadow
+      - paragraph [ref=e9]: AI Agent Memory Layer
+    - navigation [ref=e10]:
+      - link "Dashboard" [ref=e11] [cursor=pointer]:
+        - /url: /
+        - img [ref=e12]
+        - generic [ref=e14]: Dashboard
+      - link "Rules" [ref=e15] [cursor=pointer]:
+        - /url: /rules
+        - img [ref=e16]
+        - generic [ref=e19]: Rules
+      - link "Review 1" [ref=e20] [cursor=pointer]:
+        - /url: /review
+        - img [ref=e21]
+        - generic [ref=e24]: Review
+        - generic [ref=e25]: "1"
+      - link "Conflicts" [ref=e26] [cursor=pointer]:
+        - /url: /conflicts
+        - img [ref=e27]
+        - generic [ref=e29]: Conflicts
+      - link "Projects" [ref=e30] [cursor=pointer]:
+        - /url: /projects
+        - img [ref=e31]
+        - generic [ref=e33]: Projects
+      - link "Settings" [ref=e34] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e35]
+        - generic [ref=e38]: Settings
+    - generic [ref=e39]:
+      - generic [ref=e40]:
+        - img [ref=e41]
+        - text: Daemon Running
+      - paragraph [ref=e43]: localhost:7878 · local mode
+  - main [ref=e44]:
+    - generic [ref=e45]:
+      - generic [ref=e46]:
+        - heading "Rules" [level=1] [ref=e47]
+        - generic [ref=e48]: 4 rules
+      - generic [ref=e49]:
+        - generic [ref=e50]:
+          - img [ref=e51]
+          - textbox "Search rules..." [ref=e54]
+        - generic [ref=e55]:
+          - button "All" [ref=e56]
+          - button "active" [ref=e57]
+          - button "candidate" [ref=e58]
+          - button "disabled" [ref=e59]
+      - generic [ref=e60]:
+        - generic [ref=e62]:
+          - checkbox [ref=e63]
+          - generic [ref=e64]:
+            - generic [ref=e65]:
+              - generic [ref=e66]:
+                - img [ref=e67]
+                - text: active
+              - generic [ref=e70]: project
+              - generic [ref=e71]: general
+            - paragraph [ref=e72]: This project uses Go for the daemon/CLI, with React+TypeScript for the web UI
+            - generic [ref=e73]:
+              - generic [ref=e74]: v2
+              - generic [ref=e75]: "confidence: 95%"
+              - generic [ref=e76]: auto-generated
+              - generic [ref=e77]: language
+          - generic [ref=e78]:
+            - button "Disable" [ref=e79]:
+              - img [ref=e80]
+            - button "Delete" [ref=e84]:
+              - img [ref=e85]
+        - generic [ref=e89]:
+          - checkbox [ref=e90]
+          - generic [ref=e91]:
+            - generic [ref=e92]:
+              - generic [ref=e93]:
+                - img [ref=e94]
+                - text: active
+              - generic [ref=e97]: project
+              - generic [ref=e98]: toolchain
+            - paragraph [ref=e99]: "Package manager: Go modules (go.mod detected)"
+            - generic [ref=e100]:
+              - generic [ref=e101]: v2
+              - generic [ref=e102]: "confidence: 90%"
+              - generic [ref=e103]: auto-generated
+              - generic [ref=e104]: toolchain
+          - generic [ref=e105]:
+            - button "Disable" [ref=e106]:
+              - img [ref=e107]
+            - button "Delete" [ref=e111]:
+              - img [ref=e112]
+        - generic [ref=e116]:
+          - checkbox [ref=e117]
+          - generic [ref=e118]:
+            - generic [ref=e119]:
+              - generic [ref=e120]:
+                - img [ref=e121]
+                - text: active
+              - generic [ref=e124]: project
+              - generic [ref=e125]: general
+            - paragraph [ref=e126]: Always output Plan first before writing code. Bug fix requires failing test first.
+            - generic [ref=e127]:
+              - generic [ref=e128]: v2
+              - generic [ref=e129]: "confidence: 100%"
+              - generic [ref=e130]: imported:CLAUDE.md
+          - generic [ref=e131]:
+            - button "Disable" [ref=e132]:
+              - img [ref=e133]
+            - button "Delete" [ref=e137]:
+              - img [ref=e138]
+        - generic [ref=e142]:
+          - checkbox [ref=e143]
+          - generic [ref=e144]:
+            - generic [ref=e145]:
+              - generic [ref=e146]:
+                - img [ref=e147]
+                - text: candidate
+              - generic [ref=e150]: project
+              - generic [ref=e151]: testing
+            - paragraph [ref=e152]: "Test framework: go test (standard Go testing)"
+            - generic [ref=e153]:
+              - generic [ref=e154]: v1
+              - generic [ref=e155]: "confidence: 85%"
+              - generic [ref=e156]: auto-generated
+              - generic [ref=e157]: testing
+          - generic [ref=e158]:
+            - button "Activate" [ref=e159]:
+              - img [ref=e160]
+            - button "Delete" [ref=e163]:
+              - img [ref=e164]

@@ -360,3 +360,10 @@ brew/npm 安装 → shadow start (daemon 注册) → 授权范围 →
 - 每行改动都能追溯到用户的具体需求
 - 上下文接近满时执行 `/compact`
 - 保持 CLAUDE.md 与实际项目状态同步
+
+# >>> shadow managed >>>
+# [Shadow auto-managed rules — do not edit between markers]
+# Always output Plan first before writing code. Bug fix requires failing test first.
+# This project uses Go for the daemon/CLI, with React+TypeScript for the web UI
+# Package manager: Go modules (go.mod detected)
+# <<< shadow managed <<<

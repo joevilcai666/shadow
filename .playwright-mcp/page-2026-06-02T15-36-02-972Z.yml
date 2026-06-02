@@ -1,0 +1,67 @@
+- generic [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - link "👻 Shadow" [ref=e6] [cursor=pointer]:
+        - /url: /
+        - generic [ref=e7]: 👻
+        - generic [ref=e8]: Shadow
+      - paragraph [ref=e9]: AI Agent Memory Layer
+    - navigation [ref=e10]:
+      - link "Dashboard" [ref=e11] [cursor=pointer]:
+        - /url: /
+        - img [ref=e12]
+        - generic [ref=e14]: Dashboard
+      - link "Rules" [ref=e15] [cursor=pointer]:
+        - /url: /rules
+        - img [ref=e16]
+        - generic [ref=e19]: Rules
+      - link "Review 1" [ref=e20] [cursor=pointer]:
+        - /url: /review
+        - img [ref=e21]
+        - generic [ref=e24]: Review
+        - generic [ref=e25]: "1"
+      - link "Conflicts" [ref=e26] [cursor=pointer]:
+        - /url: /conflicts
+        - img [ref=e27]
+        - generic [ref=e29]: Conflicts
+      - link "Projects" [ref=e30] [cursor=pointer]:
+        - /url: /projects
+        - img [ref=e31]
+        - generic [ref=e33]: Projects
+      - link "Settings" [ref=e34] [cursor=pointer]:
+        - /url: /settings
+        - img [ref=e35]
+        - generic [ref=e38]: Settings
+    - generic [ref=e39]:
+      - generic [ref=e40]:
+        - img [ref=e41]
+        - text: Daemon Running
+      - paragraph [ref=e43]: localhost:7878 · local mode
+  - main [ref=e44]:
+    - generic [ref=e45]:
+      - generic [ref=e46]:
+        - generic [ref=e47]:
+          - heading "Review Queue" [level=1] [ref=e48]
+          - paragraph [ref=e49]: 1 candidate rules awaiting review
+        - button "Select All" [ref=e51]
+      - generic [ref=e52]:
+        - heading "High Confidence (1)" [level=3] [ref=e53]
+        - paragraph [ref=e54]: ≥ 80% — recommended to approve
+        - generic [ref=e57]:
+          - checkbox [ref=e58]
+          - generic [ref=e59]:
+            - generic [ref=e60]:
+              - generic [ref=e61]: "confidence: 85%"
+              - generic [ref=e62]: testing
+              - generic [ref=e63]: project
+            - paragraph [ref=e64]: "Test framework: go test (standard Go testing)"
+            - generic [ref=e65]:
+              - button "Approve" [ref=e66]:
+                - img [ref=e67]
+                - text: Approve
+              - button "Reject" [ref=e70]:
+                - img [ref=e71]
+                - text: Reject
+              - button "Details" [ref=e75]:
+                - img [ref=e76]
+                - text: Details
