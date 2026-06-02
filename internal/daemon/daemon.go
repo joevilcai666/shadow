@@ -49,6 +49,7 @@ type Daemon struct {
 	db           *sql.DB
 	captureEngine *capture.Engine
 	distillEngine *distill.Engine
+	adapters     []adapter.Adapter
 
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -173,6 +174,21 @@ func (d *Daemon) Run(ctx context.Context) error {
 			slog.Info("capture engine started")
 		}
 	}
+
+	// Initialize adapters for writing rules to agent context files.
+	backupDir := filepath.Join(d.homeDir, "backups")
+	d.adapters = []adapter.Adapter{
+		adapter.NewClaudeCodeAdapter(backupDir),
+		adapter.NewCursorAdapter(backupDir),
+		adapter.NewCodexAdapter(backupDir),
+	}
+	slog.Info("adapters initialized", "count", len(d.adapters))
+
+	// Start periodic distill loop: processes accumulated signals → candidate rules.
+	go d.distillLoop(ctx, d.distillEngine, cfgMgr)
+
+	// Start adapter sync loop: writes active rules to agent context files.
+	go d.adapterSyncLoop(ctx)
 
 	slog.Info("shadow daemon started", "version", d.version, "socket", d.sockPath, "http", "localhost:7878")
 
@@ -348,4 +364,198 @@ func resolveHome(homeDir string) (string, error) {
 		return "", fmt.Errorf("get home dir: %w", err)
 	}
 	return filepath.Join(home, ".shadow"), nil
+}
+
+// distillLoop runs periodically to process accumulated signals into candidate rules.
+func (d *Daemon) distillLoop(ctx context.Context, eng *distill.Engine, cfgMgr *config.Manager) {
+	// Run every 60 seconds.
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+
+	// Process immediately on startup for any backlog.
+	d.runDistillCycle(eng)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			d.runDistillCycle(eng)
+		}
+	}
+}
+
+func (d *Daemon) runDistillCycle(eng *distill.Engine) {
+	if d.db == nil {
+		return
+	}
+
+	_ = storage.NewSourceRepo(d.db) // available for future use
+
+	// Find unlinked sources (no rule_id) — these haven't been distilled yet.
+	rows, err := d.db.Query(`
+		SELECT id, signal_type, signal_strength, COALESCE(agent_name,''),
+		       COALESCE(project_path,''), COALESCE(raw_snippet,''), timestamp, confidence_contribution
+		FROM sources WHERE rule_id = '' OR rule_id IS NULL
+		ORDER BY timestamp ASC LIMIT 50`)
+	if err != nil {
+		slog.Debug("distill: query unlinked sources", "error", err)
+		return
+	}
+	defer rows.Close()
+
+	var sources []*storage.Source
+	for rows.Next() {
+		s, err := scanSourceRow(rows)
+		if err != nil {
+			continue
+		}
+		sources = append(sources, s)
+	}
+
+	if len(sources) == 0 {
+		return
+	}
+
+	slog.Info("distill: processing unlinked sources", "count", len(sources))
+
+	// Group sources by similar content for batch distillation.
+	// For simplicity, process strong signals individually and batch weak ones.
+	var strongSignals []*storage.Source
+	var weakSignals []*storage.Source
+
+	for _, s := range sources {
+		if s.SignalStrength == "strong" || s.SignalType == "manual_mark" {
+			strongSignals = append(strongSignals, s)
+		} else {
+			weakSignals = append(weakSignals, s)
+		}
+	}
+
+	// Process strong signals immediately.
+	for _, s := range strongSignals {
+		if err := eng.ProcessExplicitSignal(s); err != nil {
+			slog.Warn("distill: process explicit signal", "error", err)
+		}
+	}
+
+	// Process weak signals in batch if enough accumulated.
+	if len(weakSignals) > 0 {
+		if err := eng.ProcessSignals(weakSignals); err != nil {
+			slog.Warn("distill: process signals batch", "error", err)
+		}
+	}
+
+	d.SetState(StateDistilling)
+	// Brief state to show activity, then back to capturing.
+	time.AfterFunc(2*time.Second, func() { d.SetState(StateCapturing) })
+}
+
+// adapterSyncLoop periodically writes active rules to agent context files.
+func (d *Daemon) adapterSyncLoop(ctx context.Context) {
+	// Run every 2 minutes.
+	ticker := time.NewTicker(2 * time.Minute)
+	defer ticker.Stop()
+
+	// Sync immediately on startup.
+	d.syncAdapters()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			d.syncAdapters()
+		}
+	}
+}
+
+// SyncAdapters writes all active rules to connected agent context files.
+func (d *Daemon) SyncAdapters() {
+	d.syncAdapters()
+}
+
+func (d *Daemon) syncAdapters() {
+	if d.db == nil || len(d.adapters) == 0 {
+		return
+	}
+
+	// Don't sync if daemon is stopping.
+	if d.GetState() == StateStopping {
+		return
+	}
+
+	ruleRepo := storage.NewRuleRepo(d.db)
+
+	// Get all active rules.
+	globalRules, err := ruleRepo.List(storage.RuleFilter{Status: "active", Scope: "global"})
+	if err != nil {
+		slog.Warn("adapter sync: fetch global rules", "error", err)
+		return
+	}
+
+	// Get all projects.
+	projectRepo := storage.NewProjectRepo(d.db)
+	projects, err := projectRepo.List()
+	if err != nil {
+		slog.Warn("adapter sync: fetch projects", "error", err)
+		return
+	}
+
+	// Don't sync if daemon is stopping.
+	if d.GetState() == StateStopping {
+		return
+	}
+
+	d.SetState(StateWriting)
+
+	for _, a := range d.adapters {
+		if !a.IsInstalled() {
+			continue
+		}
+
+		// Write global rules.
+		if len(globalRules) > 0 {
+			if err := a.WriteRules(globalRules, "global", ""); err != nil {
+				slog.Warn("adapter sync: write global rules", "adapter", a.Name(), "error", err)
+			} else {
+				slog.Debug("adapter sync: wrote global rules", "adapter", a.Name(), "count", len(globalRules))
+			}
+		}
+
+		// Write project-specific rules.
+		for _, p := range projects {
+			projectRules, err := ruleRepo.List(storage.RuleFilter{
+				Status:      "active",
+				Scope:       "project",
+				ProjectPath: p.Path,
+			})
+			if err != nil {
+				continue
+			}
+			if len(projectRules) > 0 {
+				if err := a.WriteRules(projectRules, "project", p.Path); err != nil {
+					slog.Warn("adapter sync: write project rules", "adapter", a.Name(), "project", p.Name, "error", err)
+				}
+			}
+		}
+	}
+
+	// Brief state indicator, then back to capturing (if not stopping).
+	time.AfterFunc(2*time.Second, func() {
+		if d.GetState() != StateStopping {
+			d.SetState(StateCapturing)
+		}
+	})
+}
+
+// scanSourceRow scans a source from a database row.
+func scanSourceRow(rows *sql.Rows) (*storage.Source, error) {
+	var s storage.Source
+	err := rows.Scan(
+		&s.ID, &s.SignalType, &s.SignalStrength,
+		&s.AgentName, &s.ProjectPath, &s.RawSnippet,
+		&s.Timestamp, &s.ConfidenceContribution,
+	)
+	return &s, err
 }

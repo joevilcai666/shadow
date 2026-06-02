@@ -86,3 +86,69 @@ func scanSource(rows *sql.Rows) (*Source, error) {
 	)
 	return &s, err
 }
+
+// ListUnlinked returns sources that haven't been linked to any rule yet.
+func (r *SourceRepo) ListUnlinked(limit int) ([]*Source, error) {
+	query := `
+		SELECT id, rule_id, signal_type, signal_strength, COALESCE(agent_name,''),
+		       COALESCE(project_path,''), COALESCE(raw_snippet,''), timestamp, confidence_contribution
+		FROM sources WHERE rule_id = '' OR rule_id IS NULL
+		ORDER BY timestamp ASC`
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", limit)
+	}
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("query unlinked sources: %w", err)
+	}
+	defer rows.Close()
+
+	var sources []*Source
+	for rows.Next() {
+		s, err := scanSource(rows)
+		if err != nil {
+			return nil, err
+		}
+		sources = append(sources, s)
+	}
+	return sources, rows.Err()
+}
+
+// LinkToRule updates a source to be linked to a specific rule.
+func (r *SourceRepo) LinkToRule(sourceID, ruleID string) error {
+	_, err := r.db.Exec("UPDATE sources SET rule_id = ? WHERE id = ?", ruleID, sourceID)
+	if err != nil {
+		return fmt.Errorf("link source to rule: %w", err)
+	}
+	return nil
+}
+
+// CountByAgent returns the count of sources grouped by agent_name.
+func (r *SourceRepo) CountByAgent() (map[string]int, error) {
+	rows, err := r.db.Query(`
+		SELECT COALESCE(agent_name, 'unknown'), COUNT(*)
+		FROM sources GROUP BY agent_name`)
+	if err != nil {
+		return nil, fmt.Errorf("count sources by agent: %w", err)
+	}
+	defer rows.Close()
+
+	stats := make(map[string]int)
+	for rows.Next() {
+		var agent string
+		var count int
+		if err := rows.Scan(&agent, &count); err != nil {
+			return nil, err
+		}
+		stats[agent] = count
+	}
+	return stats, rows.Err()
+}
+
+// CountTotal returns the total number of sources.
+func (r *SourceRepo) CountTotal() (int, error) {
+	var count int
+	err := r.db.QueryRow("SELECT COUNT(*) FROM sources").Scan(&count)
+	return count, err
+}

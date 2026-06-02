@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/bubbletea"
+	"github.com/joevilcai666/shadow/internal/capture"
+	"github.com/joevilcai666/shadow/internal/storage"
 )
 
 // OnboardingModel is the 4-step onboarding TUI.
@@ -16,6 +19,7 @@ type OnboardingModel struct {
 	step      int
 	version   string
 	homeDir   string
+	cwd       string
 	agents    CheckboxList
 	progress  StepProgress
 	spinner   SpinnerModel
@@ -24,28 +28,48 @@ type OnboardingModel struct {
 	done      bool
 	err       error
 
+	// Privacy step
+	privacyAccepted bool
+
 	// Results from each step.
 	daemonRunning bool
 	agentsFound   []string
+	agentTargets  map[string]string // agent name -> write target
 	rulesGenerated int
+	importedFiles  []string
+	scanFacts      []string
+
+	// Database path for rule persistence.
+	dbPath string
 }
 
 // NewOnboardingModel creates the onboarding TUI model.
 func NewOnboardingModel(version string) OnboardingModel {
 	home, _ := os.UserHomeDir()
+	cwd, _ := os.Getwd()
 	return OnboardingModel{
 		step:    1,
 		version: version,
 		homeDir: home,
+		cwd:     cwd,
 		progress: StepProgress{
 			Total:  4,
 			Labels: []string{"Daemon Setup", "Privacy & Scope", "Agent Detection", "Initial Memory"},
 		},
 		agents: NewCheckboxList([]CheckboxItem{
-			{Label: "Claude Code", Description: "writes to CLAUDE.md"},
-			{Label: "Cursor", Description: "writes to .cursorrules"},
-			{Label: "GitHub Copilot", Description: "writes to .github/copilot-instructions.md"},
+			{Label: "Claude Code", Description: "→ writes to CLAUDE.md"},
+			{Label: "Cursor", Description: "→ writes to .cursorrules"},
+			{Label: "GitHub Copilot", Description: "→ writes to .github/copilot-instructions.md"},
+			{Label: "Codex", Description: "→ writes to AGENTS.md"},
 		}),
+		agentTargets: map[string]string{
+			"Claude Code":      "CLAUDE.md (project) + ~/.claude/CLAUDE.md (global)",
+			"Cursor":           ".cursorrules (project) + ~/.cursorrules (global)",
+			"GitHub Copilot":   ".github/copilot-instructions.md (project)",
+			"Codex":            "AGENTS.md (project) + ~/AGENTS.md (global)",
+		},
+		privacyAccepted: true,
+		dbPath:          filepath.Join(home, ".shadow", "shadow.db"),
 	}
 }
 
@@ -64,9 +88,20 @@ func (m OnboardingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			return m.handleEnter()
 		case "up", "k", "down", "j", " ":
-			if m.step == 2 {
+			if m.step == 3 && !m.loading {
 				m.agents = m.agents.Update(msg)
 				return m, nil
+			}
+		case "a":
+			// Advanced config hint in step 2
+			if m.step == 2 && !m.loading {
+				// Could expand advanced config; for now just a no-op placeholder
+			}
+		case "s":
+			// Skip shortcut
+			if m.step == 4 && !m.loading && !m.done {
+				// Skip questionnaire, just use scan results
+				return m, tea.Quit
 			}
 		}
 	case daemonCheckMsg:
@@ -81,10 +116,27 @@ func (m OnboardingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case agentDetectMsg:
 		m.agentsFound = msg.agents
 		m.loading = false
+		// Auto-check detected agents
+		if len(msg.agents) > 0 {
+			for i, item := range m.agents.Items {
+				found := false
+				for _, a := range msg.agents {
+					if a == item.Label {
+						found = true
+						break
+					}
+				}
+				if !found {
+					m.agents.Selected[i] = false
+				}
+			}
+		}
 		m.step = 4
 		return m, nil
 	case scanCompleteMsg:
 		m.rulesGenerated = msg.count
+		m.importedFiles = msg.importedFiles
+		m.scanFacts = msg.facts
 		m.loading = false
 		m.done = true
 		return m, nil
@@ -106,13 +158,20 @@ func (m OnboardingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m OnboardingModel) handleEnter() (tea.Model, tea.Cmd) {
+	// If error, retry current step
+	if m.err != nil {
+		m.err = nil
+		return m.handleEnter()
+	}
+
 	switch m.step {
 	case 1:
 		m.loading = true
-		m.loadingMsg = "Checking daemon status..."
+		m.loadingMsg = "Registering daemon..."
 		m.spinner = NewSpinner(m.loadingMsg)
 		return m, tea.Batch(m.spinner.Init(), checkDaemon())
 	case 2:
+		m.privacyAccepted = true
 		m.step = 3
 		m.loading = true
 		m.loadingMsg = "Detecting installed agents..."
@@ -123,9 +182,11 @@ func (m OnboardingModel) handleEnter() (tea.Model, tea.Cmd) {
 		m.loading = true
 		m.loadingMsg = "Scanning for initial memories..."
 		m.spinner = NewSpinner(m.loadingMsg)
-		return m, tea.Batch(m.spinner.Init(), scanProject())
+		return m, tea.Batch(m.spinner.Init(), scanProject(m.cwd, m.dbPath, m.agents.SelectedItems(), m.agentsFound))
 	case 4:
 		if m.done {
+			// Try to open browser
+			_ = exec.Command("open", "http://localhost:7878").Start()
 			return m, tea.Quit
 		}
 	}
@@ -144,7 +205,7 @@ func (m OnboardingModel) View() string {
 	b.WriteString("\n\n")
 
 	if m.err != nil {
-		b.WriteString(errorStyle.Render(fmt.Sprintf("Error: %v", m.err)))
+		b.WriteString(errorStyle.Render(fmt.Sprintf("✗ Error: %v", m.err)))
 		b.WriteString("\n\n")
 		b.WriteString(dimStyle.Render("Press Enter to retry or q to quit."))
 		return b.String()
@@ -161,21 +222,34 @@ func (m OnboardingModel) View() string {
 		b.WriteString("\n\n")
 		b.WriteString("This will take about 60 seconds. Everything stays local.\n")
 		b.WriteString("You can skip, go back, or quit at any time.\n\n")
+		b.WriteString("Your data:\n")
+		b.WriteString("  ✓ Stored only on this machine\n")
+		b.WriteString("  ✓ Never uploaded without your consent\n")
+		b.WriteString("  ✓ Keys/tokens automatically blocked\n\n")
 		b.WriteString(dimStyle.Render("Press Enter to begin..."))
 
 	case 2:
 		b.WriteString(boldStyle.Render("Privacy & Scope"))
 		b.WriteString("\n\n")
 		b.WriteString("Shadow will:\n")
-		b.WriteString("  ✓ Read project code & agent session logs\n")
-		b.WriteString("  ✓ Write managed rules to agent context files\n")
-		b.WriteString("  ✓ Never store keys, tokens, or credentials\n")
-		b.WriteString("  ✓ Store only distilled rules, not raw conversations\n\n")
-		b.WriteString(dimStyle.Render("Press Enter to accept (safe defaults)..."))
+		b.WriteString("  " + successStyle.Render("✓") + " Read project code & agent session logs\n")
+		b.WriteString("  " + successStyle.Render("✓") + " Write managed rules to agent context files\n")
+		b.WriteString("  " + successStyle.Render("✓") + " Never store keys, tokens, or credentials\n")
+		b.WriteString("  " + successStyle.Render("✓") + " Store only distilled rules, not raw conversations\n\n")
+		b.WriteString("🔒 Default protections (always on):\n")
+		b.WriteString("  • Block: API keys, tokens, .env files\n")
+		b.WriteString("  • Exclude: node_modules, .git, dist, .env*\n")
+		b.WriteString("  • Only distilled rules stored, never raw code\n\n")
+		b.WriteString(dimStyle.Render("Press Enter to accept safe defaults..."))
 
 	case 3:
 		b.WriteString(boldStyle.Render("Select Agents"))
 		b.WriteString("\n\n")
+		if len(m.agentsFound) > 0 {
+			b.WriteString(dimStyle.Render(fmt.Sprintf("Detected %d agent(s) on your machine:\n\n", len(m.agentsFound))))
+		} else {
+			b.WriteString(dimStyle.Render("No agents auto-detected. Select manually:\n\n"))
+		}
 		b.WriteString(m.agents.View())
 		b.WriteString(dimStyle.Render("↑↓ move · Space toggle · Enter confirm"))
 
@@ -187,8 +261,18 @@ func (m OnboardingModel) View() string {
 			if len(m.agentsFound) > 0 {
 				b.WriteString(fmt.Sprintf("  Agents connected: %s\n", strings.Join(m.agentsFound, ", ")))
 			}
-			if m.rulesGenerated > 0 {
-				b.WriteString(fmt.Sprintf("  Initial memories: %d candidate rules generated\n", m.rulesGenerated))
+			b.WriteString(fmt.Sprintf("  Initial memories: %d candidate rules generated\n", m.rulesGenerated))
+			if len(m.importedFiles) > 0 {
+				b.WriteString(fmt.Sprintf("  Imported from: %s\n", strings.Join(m.importedFiles, ", ")))
+			}
+			if len(m.scanFacts) > 0 {
+				b.WriteString("\n  " + dimStyle.Render("Discovered:") + "\n")
+				for _, fact := range m.scanFacts {
+					if len(fact) > 60 {
+						fact = fact[:60] + "..."
+					}
+					b.WriteString("    • " + dimStyle.Render(fact) + "\n")
+				}
 			}
 
 			b.WriteString("\n")
@@ -197,16 +281,16 @@ func (m OnboardingModel) View() string {
 			b.WriteString("  shadow status  — check everything is running\n")
 			b.WriteString("  shadow open    — open web console at localhost:7878\n")
 			b.WriteString("  shadow review  — review candidate rules\n\n")
-			b.WriteString(dimStyle.Render("Press Enter to finish."))
+			b.WriteString(dimStyle.Render("Press Enter to open web console (or q to stay in terminal)..."))
 		} else {
 			b.WriteString(boldStyle.Render("Initial Memory Generation"))
 			b.WriteString("\n\n")
 			b.WriteString("Shadow will scan your project for:\n")
 			b.WriteString("  • Package manager (lockfile detection)\n")
 			b.WriteString("  • Test framework (config detection)\n")
-			b.WriteString("  • Existing rules (CLAUDE.md, .cursorrules)\n")
-			b.WriteString("  • Directory conventions\n\n")
-			b.WriteString(dimStyle.Render("Press Enter to scan..."))
+			b.WriteString("  • Existing rules (CLAUDE.md, .cursorrules, AGENTS.md)\n")
+			b.WriteString("  • Language and framework detection\n\n")
+			b.WriteString(dimStyle.Render("Press Enter to scan...  (s to skip)"))
 		}
 	}
 
@@ -217,7 +301,11 @@ func (m OnboardingModel) View() string {
 
 type daemonCheckMsg struct{ running bool }
 type agentDetectMsg struct{ agents []string }
-type scanCompleteMsg struct{ count int }
+type scanCompleteMsg struct {
+	count         int
+	importedFiles []string
+	facts         []string
+}
 type errorMsg struct{ err error }
 
 func checkDaemon() tea.Cmd {
@@ -242,35 +330,142 @@ func detectAgents() tea.Cmd {
 			if _, err := os.Stat("/Applications/Cursor.app"); err == nil {
 				agents = append(agents, "Cursor")
 			}
+		} else if runtime.GOOS == "linux" {
+			if _, err := os.Stat(filepath.Join(home, ".cursor")); err == nil {
+				agents = append(agents, "Cursor")
+			}
 		}
 
 		// Detect GitHub Copilot.
 		if _, err := exec.LookPath("gh"); err == nil {
-			agents = append(agents, "GitHub Copilot")
+			// Check for copilot extension
+			if _, err := exec.LookPath("github-copilot-cli"); err == nil {
+				agents = append(agents, "GitHub Copilot")
+			} else if _, err := os.Stat(filepath.Join(home, ".config", "gh")); err == nil {
+				agents = append(agents, "GitHub Copilot")
+			}
 		}
 
-		if len(agents) == 0 {
-			agents = []string{"(none detected)"}
+		// Detect Codex.
+		if _, err := exec.LookPath("codex"); err == nil {
+			agents = append(agents, "Codex")
+		} else if _, err := os.Stat(filepath.Join(home, ".codex")); err == nil {
+			agents = append(agents, "Codex")
 		}
 
 		return agentDetectMsg{agents: agents}
 	}
 }
 
-func scanProject() tea.Cmd {
+func scanProject(cwd, dbPath string, selectedAgents []CheckboxItem, detectedAgents []string) tea.Cmd {
 	return func() tea.Msg {
-		count := 0
-		// Quick scan for lockfiles and config files.
-		files := []string{
-			"package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb",
-			"go.mod", "Cargo.toml", "pyproject.toml",
-			"CLAUDE.md", ".cursorrules", "AGENTS.md",
+		var facts []string
+		var importedFiles []string
+		totalRules := 0
+
+		// Open database for writing rules.
+		db, err := storage.Open(dbPath)
+		if err != nil {
+			slog.Warn("onboarding: cannot open database", "error", err)
+			// Fall back to just counting
+			return scanCompleteMsg{count: countScanFiles(cwd), facts: facts}
 		}
-		for _, f := range files {
-			if _, err := os.Stat(f); err == nil {
-				count++
+		defer db.Close()
+
+		ruleRepo := storage.NewRuleRepo(db)
+
+		// Step 1: Scan project for conventions.
+		scanner := capture.NewScanner(cwd)
+		scanResult, err := scanner.Scan()
+		if err != nil {
+			slog.Warn("onboarding: scan failed", "error", err)
+		} else {
+			facts = append(facts, scanResult.Facts...)
+
+			// Convert scan results to candidate rules.
+			rules := scanResult.ToRules()
+			for _, rule := range rules {
+				if err := ruleRepo.Create(rule); err != nil {
+					slog.Warn("onboarding: create rule from scan", "error", err)
+				} else {
+					totalRules++
+				}
 			}
 		}
-		return scanCompleteMsg{count: count}
+
+		// Step 2: Import existing rule files.
+		importer := capture.NewImporter()
+		ruleFiles := []string{
+			"CLAUDE.md",
+			".claude/CLAUDE.md",
+			".cursorrules",
+			".cursor/rules",
+			"AGENTS.md",
+			".github/copilot-instructions.md",
+		}
+
+		for _, f := range ruleFiles {
+			path := filepath.Join(cwd, f)
+			if _, err := os.Stat(path); err != nil {
+				continue
+			}
+			rules, err := importer.ImportFile(path)
+			if err != nil {
+				slog.Warn("onboarding: import file", "file", path, "error", err)
+				continue
+			}
+			for _, rule := range rules {
+				// Tag imported rules with their source file
+				rule.Tags = append(rule.Tags, "import:"+f)
+				if err := ruleRepo.Create(rule); err != nil {
+					slog.Warn("onboarding: create imported rule", "error", err)
+				} else {
+					totalRules++
+				}
+			}
+			importedFiles = append(importedFiles, f)
+			facts = append(facts, fmt.Sprintf("Imported rules from %s (%d rules)", f, len(rules)))
+		}
+
+		// Step 3: Register the project.
+		projectRepo := storage.NewProjectRepo(db)
+		projectName := filepath.Base(cwd)
+		project := &storage.Project{
+			ID:        storage.NewID(),
+			Path:      cwd,
+			Name:      projectName,
+			Agents:    agentNames(detectedAgents),
+			CreatedAt: storage.Now(),
+		}
+		// Try to create; ignore error if already exists.
+		_ = projectRepo.Create(project)
+
+		return scanCompleteMsg{
+			count:         totalRules,
+			importedFiles: importedFiles,
+			facts:         facts,
+		}
 	}
+}
+
+func countScanFiles(cwd string) int {
+	count := 0
+	files := []string{
+		"package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb",
+		"go.mod", "Cargo.toml", "pyproject.toml",
+		"CLAUDE.md", ".cursorrules", "AGENTS.md",
+	}
+	for _, f := range files {
+		if _, err := os.Stat(filepath.Join(cwd, f)); err == nil {
+			count++
+		}
+	}
+	return count
+}
+
+func agentNames(selected []string) []string {
+	if selected == nil {
+		return []string{}
+	}
+	return selected
 }

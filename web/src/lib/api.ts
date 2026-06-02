@@ -64,6 +64,27 @@ export interface DashboardData {
   total_rules: number;
   active_rules: number;
   candidate_rules: number;
+  disabled_rules: number;
+  conflicted_rules: number;
+  total_sources: number;
+  project_count: number;
+  agent_stats: Record<string, number>;
+}
+
+export interface Adapter {
+  name: string;
+  label: string;
+  installed: boolean;
+  enabled: boolean;
+  target_path: string;
+}
+
+export interface Config {
+  capture: { enabled: boolean; projects: Record<string, { enabled: boolean }> };
+  privacy: { exclude_patterns: string[]; deny_patterns: string[] };
+  distill: { threshold: string; auto_activate_low_risk: boolean; batch_mode: boolean };
+  adapters: { claude_code: { enabled: boolean }; cursor: { enabled: boolean }; codex: { enabled: boolean } };
+  server: { port: number; bind: string };
 }
 
 // API functions
@@ -90,5 +111,15 @@ export const api = {
   getDashboard: () => fetchAPI<DashboardData>('/dashboard'),
 
   // Config
-  getConfig: () => fetchAPI<Record<string, unknown>>('/config'),
+  getConfig: () => fetchAPI<Config>('/config'),
+  updateConfig: (updates: Record<string, unknown>) => fetchAPI<void>('/config', { method: 'PUT', body: JSON.stringify(updates) }),
+
+  // Adapters
+  listAdapters: () => fetchAPI<Adapter[]>('/adapters'),
+  toggleAdapter: (name: string, enabled: boolean) => fetchAPI<void>(`/adapters/${name}/toggle`, { method: 'POST', body: JSON.stringify({ enabled }) }),
+  syncAdapters: () => fetchAPI<void>('/adapters/sync', { method: 'POST' }),
+
+  // Capture
+  captureStatus: () => fetchAPI<{ enabled: boolean }>('/capture/status'),
+  toggleCapture: () => fetchAPI<void>('/capture/toggle', { method: 'POST' }),
 };
