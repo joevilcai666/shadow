@@ -381,7 +381,41 @@ func (s *Server) createProject(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 	cfg := s.configMgr.Get()
-	writeJSON(w, http.StatusOK, cfg)
+	// Transform to camelCase JSON matching frontend expectations.
+	writeJSON(w, http.StatusOK, map[string]any{
+		"capture": map[string]any{
+			"enabled":  cfg.Capture.Enabled,
+			"projects": cfg.Capture.Projects,
+		},
+		"privacy": map[string]any{
+			"exclude_patterns": cfg.Privacy.ExcludePatterns,
+			"deny_patterns":    cfg.Privacy.DenyPatterns,
+		},
+		"distill": map[string]any{
+			"threshold":              cfg.Distill.Threshold,
+			"auto_activate_low_risk": cfg.Distill.AutoActivateLowRisk,
+			"batch_mode":             cfg.Distill.BatchMode,
+			"llm_model":              cfg.Distill.LLMModel,
+		},
+		"adapters": map[string]any{
+			"claude_code": map[string]any{
+				"enabled":     cfg.Adapters.ClaudeCode.Enabled,
+				"global_path": cfg.Adapters.ClaudeCode.GlobalPath,
+			},
+			"cursor": map[string]any{
+				"enabled":     cfg.Adapters.Cursor.Enabled,
+				"global_path": cfg.Adapters.Cursor.GlobalPath,
+			},
+			"codex": map[string]any{
+				"enabled":     cfg.Adapters.Codex.Enabled,
+				"global_path": cfg.Adapters.Codex.GlobalPath,
+			},
+		},
+		"server": map[string]any{
+			"port": cfg.Server.Port,
+			"bind": cfg.Server.Bind,
+		},
+	})
 }
 
 func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
