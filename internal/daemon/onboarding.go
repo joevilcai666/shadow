@@ -489,7 +489,7 @@ func (m OnboardingModel) View() string {
 			case subStepQuestion:
 				bodyCard = components.Card{
 					Title:   "A couple of questions",
-					Content: Questionnaire{}.View(),
+					Content: m.questionnaire.View(),
 					Focused: true,
 				}
 				help = s.Dim.Render("↑↓ select  Enter confirm  s skip")
