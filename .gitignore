@@ -37,3 +37,6 @@ Thumbs.db
 *.db-wal
 .shadow/
 go.work
+
+# mavis plan workspace
+.mavis/
