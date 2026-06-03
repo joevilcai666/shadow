@@ -7,6 +7,10 @@
 // composes them). Instead, this file holds the local style helpers
 // used by the components. The color values mirror internal/daemon/styles.go;
 // keep them in sync if either changes.
+//
+// Canonical contract for all colors: docs/style-guide.md and
+// docs/style-tokens.json. Change those AND both Go files in the
+// same commit.
 package components
 
 import "github.com/charmbracelet/lipgloss"

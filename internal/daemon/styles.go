@@ -7,6 +7,16 @@ import "github.com/charmbracelet/lipgloss"
 // Brand colors are the public face of Shadow (purple → blue gradient).
 // Status colors are universal (green=success, yellow=warning, red=error).
 // Dim/border are chrome — used for non-interactive UI scaffolding.
+//
+// IMPORTANT: this file is the canonical token source for the daemon
+// package. The human-readable contract is docs/style-guide.md and
+// the machine-readable contract is docs/style-tokens.json. When you
+// change a value here, update BOTH docs in the same commit.
+//
+// The colors are mirrored (intentionally) in
+// internal/daemon/components/styles.go because the components
+// subpackage cannot import this one (would be a circular import).
+// Keep the two in sync.
 const (
 	ColorBrand   = "#A855F7" // primary purple
 	ColorAccent  = "#818CF8" // secondary blue

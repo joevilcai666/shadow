@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json.schemastore.org/design-tokens",
+  "name": "shadow-tui",
+  "version": "0.1.0",
+  "description": "Design tokens for Shadow's TUI. Source of truth: docs/style-guide.md. Update both together.",
+  "color": {
+    "brand": {
+      "value": "#A855F7",
+      "rgb": [168, 85, 247],
+      "role": "primary purple — brand wordmark, titles, current step"
+    },
+    "accent": {
+      "value": "#818CF8",
+      "rgb": [129, 140, 248],
+      "role": "secondary blue — slogan, links, secondary highlights"
+    },
+    "success": {
+      "value": "#22C55E",
+      "rgb": [34, 197, 94],
+      "role": "checkmarks, done-state, positive confirmations"
+    },
+    "warning": {
+      "value": "#EAB308",
+      "rgb": [234, 179, 8],
+      "role": "caution, soft alerts"
+    },
+    "error": {
+      "value": "#EF4444",
+      "rgb": [239, 68, 68],
+      "role": "error marks, fail-state"
+    },
+    "dim": {
+      "value": "#6B7280",
+      "rgb": [107, 114, 128],
+      "role": "non-interactive helper text, secondary labels"
+    },
+    "border": {
+      "value": "#6D28D9",
+      "rgb": [109, 40, 217],
+      "role": "unfocused card border (deep purple)"
+    },
+    "bg": {
+      "value": "#1E1B4B",
+      "rgb": [30, 27, 75],
+      "role": "optional deep-purple background tint (rare)"
+    }
+  },
+  "gradient": {
+    "banner": {
+      "type": "linear-rgb",
+      "direction": "left-to-right",
+      "stops": [
+        { "position": 0.0, "color": "{color.brand}" },
+        { "position": 1.0, "color": "{color.accent}" }
+      ],
+      "appliesTo": ["banner wordmark", "slogan"]
+    }
+  },
+  "spacing": {
+    "cardPadding": { "vertical": 1, "horizontal": 2 },
+    "sectionGap": "one empty line",
+    "pipelineToCardGap": "one empty line"
+  },
+  "border": {
+    "style": "rounded",
+    "color": "{color.border}",
+    "focusedColor": "{color.brand}",
+    "focusedWeight": "bold"
+  },
+  "animation": {
+    "bannerFadeIn": {
+      "durationMs": 1000,
+      "frameMs": 20,
+      "trigger": "first render of banner",
+      "suppressInNonTTY": true
+    },
+    "spinner": {
+      "frameMs": 80,
+      "trigger": "loading state"
+    }
+  },
+  "width": {
+    "minCol": 80,
+    "wideCol": 120,
+    "narrowCol": 40,
+    "pipelineMin": 60,
+    "pipelineTarget": 100
+  },
+  "indicator": {
+    "current": "●",
+    "done": "✓",
+    "pending": "○",
+    "connector": "━━━━━"
+  }
+}
