@@ -68,6 +68,25 @@ var startCmd = &cobra.Command{
 			return printStatus(client)
 		}
 
+		// Port conflict retry: probe 7878 (and a few neighbors) for a
+		// free port. If the default is busy (e.g. another tool grabbed
+		// it), walk forward up to 5 ports. The chosen port is then
+		// passed to the daemon via the SHADOW_PORT env var so the
+		// child process binds the same port we probed.
+		port, err := daemon.TryPorts(7878, 5)
+		if err != nil {
+			return fmt.Errorf("port probe: %w", err)
+		}
+		if port != 7878 {
+			fmt.Printf("⚠ Port 7878 is in use, falling back to %d\n", port)
+			fmt.Println("  To free 7878, run: lsof -ti:7878 | xargs kill -9")
+		}
+		// Persist for the launchd plist (the daemon reads SHADOW_PORT
+		// from its environment at startup).
+		if err := os.Setenv("SHADOW_PORT", fmt.Sprintf("%d", port)); err != nil {
+			return fmt.Errorf("set SHADOW_PORT: %w", err)
+		}
+
 		// Install launchd plist.
 		home, _ := os.UserHomeDir()
 		execPath, _ := os.Executable()
@@ -78,6 +97,13 @@ var startCmd = &cobra.Command{
 			HomeDir:    home + "/.shadow",
 		}
 		if err := daemon.InstallLaunchd(cfg); err != nil {
+			// Permission issues (writing under ~/Library/LaunchAgents
+			// shouldn't require sudo, but we surface a friendly hint
+			// just in case the user is on a locked-down profile).
+			if os.IsPermission(err) {
+				fmt.Println("⚠ Permission denied writing the launchd plist.")
+				fmt.Println("  Try: sudo launchctl load -w ~/Library/LaunchAgents/com.shadow.daemon.plist")
+			}
 			return fmt.Errorf("install launchd: %w", err)
 		}
 		fmt.Println("✓ Shadow daemon registered with launchd")
@@ -85,9 +111,15 @@ var startCmd = &cobra.Command{
 		// Start via launchctl.
 		fmt.Println("Starting daemon...")
 		if err := daemon.LoadLaunchd("com.shadow.daemon"); err != nil {
+			// launchctl commonly returns a permission error if the
+			// user session is missing a security context.
+			if strings.Contains(err.Error(), "permission") || strings.Contains(err.Error(), "not privileged") {
+				fmt.Println("⚠ launchctl could not start the daemon.")
+				fmt.Println("  Try: sudo launchctl load -w ~/Library/LaunchAgents/com.shadow.daemon.plist")
+			}
 			return fmt.Errorf("start daemon: %w", err)
 		}
-		fmt.Println("✓ Shadow daemon started")
+		fmt.Printf("✓ Shadow daemon started (http://localhost:%d)\n", port)
 		fmt.Println()
 
 		// Launch onboarding TUI.
