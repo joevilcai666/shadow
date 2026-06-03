@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -43,6 +44,7 @@ type Daemon struct {
 	pidPath  string
 	logDir   string
 	homeDir  string
+	port     int
 
 	sockServer   *SocketServer
 	httpServer   *http.Server
@@ -59,6 +61,13 @@ type Daemon struct {
 type Config struct {
 	Version string
 	HomeDir string // defaults to ~/.shadow
+
+	// Port is the TCP port the HTTP server binds to. If zero, the
+	// daemon falls back to the SHADOW_PORT environment variable, then
+	// to the historical default of 7878. This is the knob the
+	// "port conflict retry" logic in cmd/shadow uses to recover from
+	// EADDRINUSE on the default port.
+	Port int
 }
 
 // New creates a new Daemon instance.
@@ -77,6 +86,19 @@ func New(cfg Config) (*Daemon, error) {
 		logDir:   filepath.Join(home, "logs"),
 		homeDir:  home,
 		done:     make(chan struct{}),
+	}
+
+	// Resolve the HTTP port: explicit Config wins, then SHADOW_PORT
+	// (used by cmd/shadow's port-conflict retry), then the default 7878.
+	if cfg.Port > 0 {
+		d.port = cfg.Port
+	} else if p := os.Getenv("SHADOW_PORT"); p != "" {
+		if n, err := strconv.Atoi(p); err == nil && n > 0 {
+			d.port = n
+		}
+	}
+	if d.port == 0 {
+		d.port = 7878
 	}
 
 	return d, nil
@@ -136,12 +158,12 @@ func (d *Daemon) Run(ctx context.Context) error {
 		storage.NewConfigRepo(db),
 		storage.NewProjectRepo(db),
 		cfgMgr,
-		config.ServerConfig{Port: 7878, Bind: "127.0.0.1"},
+		config.ServerConfig{Port: d.port, Bind: "127.0.0.1"},
 		mcpServer,
 	)
 
 	d.httpServer = &http.Server{
-		Addr:    "127.0.0.1:7878",
+		Addr:    fmt.Sprintf("127.0.0.1:%d", d.port),
 		Handler: httpSrv,
 	}
 	go func() {
@@ -190,7 +212,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Start adapter sync loop: writes active rules to agent context files.
 	go d.adapterSyncLoop(ctx)
 
-	slog.Info("shadow daemon started", "version", d.version, "socket", d.sockPath, "http", "localhost:7878")
+	slog.Info("shadow daemon started", "version", d.version, "socket", d.sockPath, "http", fmt.Sprintf("localhost:%d", d.port))
 
 	// Handle signals.
 	sigCh := make(chan os.Signal, 1)
@@ -256,6 +278,15 @@ func (d *Daemon) GetState() State {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	return d.state
+}
+
+// Port returns the TCP port the HTTP server is bound to. Callers can
+// use this after New() to learn which port the daemon picked (e.g.
+// when the default 7878 was busy and the retry logic picked another).
+func (d *Daemon) Port() int {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	return d.port
 }
 
 func (d *Daemon) shutdown() error {
