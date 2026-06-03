@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -492,14 +493,54 @@ func findProjectContexts(home string) []string {
 	return dirs
 }
 
+var (
+	openURL          = "http://localhost:7878"
+	openHTTPTimeout  = 5 * time.Second
+	openPollInterval = 200 * time.Millisecond
+)
+
 var openCmd = &cobra.Command{
 	Use:   "open",
 	Short: "Open the Shadow web console in browser",
+	Long: `Open the Shadow web console in your default browser.
+
+If the daemon is not running, this command exits with an error
+instructing you to run 'shadow start' first. If the daemon is
+starting up (IPC socket up but HTTP server not yet bound), it polls
+briefly before giving up.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		url := "http://localhost:7878"
-		fmt.Printf("Opening Shadow console at %s\n", url)
-		return exec.Command("open", url).Start()
+		client := daemon.NewClient()
+		if !client.IsRunning() {
+			return fmt.Errorf("Shadow daemon is not running.\n  Run 'shadow start' first, then 'shadow open'.")
+		}
+
+		if !waitForHTTP(openURL+"/api/dashboard", openHTTPTimeout) {
+			return fmt.Errorf("daemon is running (IPC up) but HTTP server didn't become ready in %s.\n  Try 'shadow status' or 'shadow restart'.", openHTTPTimeout)
+		}
+
+		fmt.Printf("Opening Shadow console at %s\n", openURL)
+		return exec.Command("open", openURL).Start()
 	},
+}
+
+// waitForHTTP polls `url` until it returns HTTP 200, or `timeout`
+// elapses. Returns true on 200, false on timeout. Used by `shadow
+// open` to bridge the small window between IPC-socket-ready and
+// HTTP-listener-ready during daemon startup.
+func waitForHTTP(url string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return true
+			}
+		}
+		time.Sleep(openPollInterval)
+	}
+	return false
 }
 
 func init() {
