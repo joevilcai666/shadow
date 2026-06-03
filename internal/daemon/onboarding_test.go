@@ -31,6 +31,30 @@ func TestOnboardingView_AllSteps(t *testing.T) {
 			m.agentsFound = nil
 		}},
 		{"step4_pending", func(m *OnboardingModel) { m.step = 4 }},
+		{"step4_scan_done", func(m *OnboardingModel) {
+			m.step = 4
+			m.subStep = subStepScanDone
+			m.rulesGenerated = 3
+			m.importedFiles = []string{"CLAUDE.md"}
+			m.scanFacts = []string{"Detected Go module"}
+		}},
+		{"step4_question", func(m *OnboardingModel) {
+			m.step = 4
+			m.subStep = subStepQuestion
+		}},
+		{"step4_applied", func(m *OnboardingModel) {
+			m.step = 4
+			m.subStep = subStepApplied
+			m.done = true
+			m.appliedFiles = []string{"CLAUDE.md", ".cursorrules"}
+		}},
+		{"step4_applying", func(m *OnboardingModel) {
+			m.step = 4
+			m.subStep = subStepApplying
+			m.loading = true
+			m.loadingMsg = "applying"
+			m.spinner = NewSpinner(m.loadingMsg)
+		}},
 		{"step4_done", func(m *OnboardingModel) {
 			m.step = 4
 			m.done = true
