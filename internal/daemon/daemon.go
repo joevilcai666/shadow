@@ -175,7 +175,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Start capture engine (reuses ruleRepo from HTTP server setup).
 	sourceRepo := storage.NewSourceRepo(db)
 	d.captureEngine = capture.NewEngine(cfgMgr, sourceRepo, ruleRepo, d.homeDir)
+	// Register all available parsers. Each one probes well-known log
+	// locations at Start() and skips itself if the agent isn't installed.
 	d.captureEngine.RegisterParser(capture.NewClaudeCodeParser())
+	d.captureEngine.RegisterParser(capture.NewCodexParser())
+	d.captureEngine.RegisterParser(capture.NewCursorParser())
 
 	// Start distill engine â use LLM if API key configured, else rule-based.
 	var distiller distill.Distiller
