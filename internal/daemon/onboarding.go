@@ -469,44 +469,41 @@ func (m OnboardingModel) View() string {
 			help = s.Dim.Render("↑↓ move · Space toggle · Enter confirm")
 
 		case 4:
-			if m.done {
-				var facts strings.Builder
-				if len(m.scanFacts) > 0 {
-					facts.WriteString("\n")
-					facts.WriteString(s.Dim.Render("  Discovered:"))
-					facts.WriteString("\n")
-					for _, fact := range m.scanFacts {
-						if len(fact) > 60 {
-							fact = fact[:60] + "..."
-						}
-						facts.WriteString("    • " + s.Dim.Render(fact) + "\n")
-					}
+			// Step 4 is a multi-phase flow tracked by m.subStep:
+			//   subStepScanIdle    — pre-scan: show the "what we'll scan" prompt.
+			//   subStepScanDone    — scan finished: show the results card
+			//                        and invite the user to continue.
+			//   subStepQuestion    — questionnaire component is shown
+			//                        (Questionnaire.View() handles its own UI).
+			//   subStepApplied     — final summary ("Shadow is ready!").
+			// The other substeps (subStepScanRunning, subStepApplying) flip
+			// m.loading=true and are handled by the spinner branch above.
+			switch m.subStep {
+			case subStepScanDone:
+				bodyCard = components.Card{
+					Title: "Initial scan complete",
+					Content: renderScanResults(s, m),
+					Focused: true,
 				}
-
-				var lines []string
-				lines = append(lines, s.Success.Render("✓ Shadow is ready!"))
-				lines = append(lines, "")
-				if len(m.agentsFound) > 0 {
-					lines = append(lines, fmt.Sprintf("  Agents connected: %s", strings.Join(m.agentsFound, ", ")))
+				help = s.Dim.Render("Press Enter to continue, b to go back, s to skip…")
+			case subStepQuestion:
+				bodyCard = components.Card{
+					Title:   "A couple of questions",
+					Content: Questionnaire{}.View(),
+					Focused: true,
 				}
-				lines = append(lines, fmt.Sprintf("  Initial memories: %d candidate rules generated", m.rulesGenerated))
-				if len(m.importedFiles) > 0 {
-					lines = append(lines, fmt.Sprintf("  Imported from: %s", strings.Join(m.importedFiles, ", ")))
-				}
-				lines = append(lines, facts.String())
-				lines = append(lines, "")
-				lines = append(lines, s.Dim.Render("Next steps:"))
-				lines = append(lines, "  shadow status  — check everything is running")
-				lines = append(lines, "  shadow open    — open web console at localhost:7878")
-				lines = append(lines, "  shadow review  — review candidate rules")
-
+				help = s.Dim.Render("↑↓ select  Enter confirm  s skip")
+			case subStepApplied:
 				bodyCard = components.Card{
 					Title:   "Onboarding complete",
-					Content: strings.Join(lines, "\n"),
+					Content: renderAppliedSummary(s, m),
 					Focused: true,
 				}
 				help = s.Dim.Render("Press Enter to open web console (or q to stay in terminal)...")
-			} else {
+			default:
+				// subStepScanIdle (the entry state) and any unknown value
+				// show the pre-scan prompt. This is also the safe
+				// fallback when m.done is true but subStep is wrong.
 				bodyCard = components.Card{
 					Title: "Initial Memory Generation",
 					Content: strings.Join([]string{
@@ -560,6 +557,61 @@ type applyCompleteMsg struct {
 	errs         map[string]error
 }
 type errorMsg struct{ err error }
+
+// renderScanResults builds the body text for the "scan complete" card
+// in step 4. It shows the discovered facts, the imported files, and
+// the count of candidate rules. Used by the new View() sub-step
+// rendering.
+func renderScanResults(s Styles, m OnboardingModel) string {
+	var b strings.Builder
+	if len(m.scanFacts) > 0 {
+		b.WriteString(s.Dim.Render("Discovered:") + "\n")
+		for _, fact := range m.scanFacts {
+			if len(fact) > 60 {
+				fact = fact[:60] + "..."
+			}
+			b.WriteString("  • " + s.Dim.Render(fact) + "\n")
+		}
+		b.WriteString("\n")
+	}
+	if len(m.importedFiles) > 0 {
+		b.WriteString(s.Dim.Render("Imported from: ") +
+			strings.Join(m.importedFiles, ", ") + "\n\n")
+	}
+	b.WriteString(fmt.Sprintf("  %s %d candidate rules generated\n",
+		s.Success.Render("✓"), m.rulesGenerated))
+	return b.String()
+}
+
+// renderAppliedSummary builds the body text for the final "Shadow is
+// ready!" card. It mirrors the legacy summary but also surfaces
+// apply errors and the list of files actually written.
+func renderAppliedSummary(s Styles, m OnboardingModel) string {
+	var b strings.Builder
+	b.WriteString(s.Success.Render("✓ Shadow is ready!") + "\n\n")
+	if len(m.agentsFound) > 0 {
+		b.WriteString(fmt.Sprintf("  Agents connected: %s\n",
+			strings.Join(m.agentsFound, ", ")))
+	}
+	b.WriteString(fmt.Sprintf("  Initial memories: %d candidate rules\n", m.rulesGenerated))
+	if len(m.appliedFiles) > 0 {
+		b.WriteString(fmt.Sprintf("  Files written: %s\n",
+			strings.Join(m.appliedFiles, ", ")))
+	}
+	if len(m.applyErrors) > 0 {
+		b.WriteString("\n")
+		b.WriteString(s.Warning.Render("  ⚠ Some files could not be written:") + "\n")
+		for name, err := range m.applyErrors {
+			b.WriteString(fmt.Sprintf("    • %s: %s\n", name, s.Dim.Render(err.Error())))
+		}
+	}
+	b.WriteString("\n")
+	b.WriteString(s.Dim.Render("Next steps:") + "\n")
+	b.WriteString("  shadow status  — check everything is running\n")
+	b.WriteString("  shadow open    — open web console at localhost:7878\n")
+	b.WriteString("  shadow review  — review candidate rules\n")
+	return b.String()
+}
 
 func checkDaemon() tea.Cmd {
 	return func() tea.Msg {
