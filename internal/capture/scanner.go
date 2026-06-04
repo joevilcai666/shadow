@@ -27,36 +27,11 @@ type ScanResult struct {
 	Framework      string
 	ExistingRules  []string // Paths to existing rule files
 	Facts          []string // Human-readable facts discovered
-
-	// SensitiveFiles lists paths that the scanner skipped because they
-	// matched a sensitive-filename pattern (.env, *.pem, *.key,
-	// id_rsa*, id_dsa*, etc.). This is exposed so callers — and
-	// tests — can verify the filter ran end-to-end.
-	SensitiveFiles []string
-
-	// SecretsFound counts files whose contents contained a known
-	// secret pattern (sk-..., ghp_..., AIza..., AKIA...). The actual
-	// file paths and snippets are NOT stored in the result to avoid
-	// leaking what we filtered.
-	SecretsFound int
 }
 
 // Scan performs a quick scan of the project directory.
-//
-// The scan is "safe by default": it walks the project root to find files
-// that look sensitive (.env, *.pem, *.key, id_rsa*, id_dsa*, etc.) and
-// excludes them from any result. It also tracks the names of those
-// files in SensitiveFiles so callers (and tests) can verify the
-// filter ran. The walk is shallow (no recursion into node_modules, .git,
-// etc.) to stay fast on large repos.
 func (s *Scanner) Scan() (*ScanResult, error) {
 	result := &ScanResult{}
-
-	// Walk the project root and find sensitive files BEFORE we make any
-	// other decision. The list of sensitive files is the source of truth
-	// for what to skip; later stages (findExistingRules, the importer)
-	// check against this list as a defense-in-depth.
-	s.walkSensitiveFiles(result)
 
 	// Detect package manager.
 	s.detectPackageManager(result)
@@ -201,148 +176,11 @@ func (s *Scanner) findExistingRules(r *ScanResult) {
 
 	for _, f := range ruleFiles {
 		path := filepath.Join(s.projectPath, f)
-		if isSensitiveFilename(f) {
-			// Defense-in-depth: even if a rule file matches a sensitive
-			// name, we skip it. In practice this never matches for the
-			// curated list above, but the guard makes the function
-			// safe against future additions.
-			continue
-		}
 		if _, err := os.Stat(path); err == nil {
 			r.ExistingRules = append(r.ExistingRules, path)
 			r.Facts = append(r.Facts, fmt.Sprintf("Existing rules: %s", f))
 		}
 	}
-}
-
-// walkSensitiveFiles performs a shallow directory walk of the project
-// root and records any files whose names match a sensitive-filename
-// pattern. It does NOT recurse into the standard "junk" directories
-// (node_modules, .git, dist, .venv) to keep it fast.
-//
-// This is the entry-point for the privacy filter; later code
-// (findExistingRules, the Importer) cross-checks against the
-// recorded sensitive files for defense in depth.
-func (s *Scanner) walkSensitiveFiles(r *ScanResult) {
-	if s.projectPath == "" {
-		return
-	}
-	entries, err := os.ReadDir(s.projectPath)
-	if err != nil {
-		return // not readable; nothing to do
-	}
-
-	skipDirs := map[string]bool{
-		"node_modules": true,
-		".git":         true,
-		"dist":         true,
-		"build":        true,
-		".venv":        true,
-		"venv":         true,
-		"__pycache__":  true,
-		".next":        true,
-		"target":       true, // Rust
-	}
-
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() {
-			if skipDirs[name] {
-				continue
-			}
-			continue // shallow walk only
-		}
-		if isSensitiveFilename(name) {
-			full := filepath.Join(s.projectPath, name)
-			r.SensitiveFiles = append(r.SensitiveFiles, full)
-			r.Facts = append(r.Facts, fmt.Sprintf("Skipped sensitive file: %s", name))
-		}
-	}
-}
-
-// isSensitiveFilename returns true if a filename looks like it might
-// contain secrets, credentials, or keys. The match is intentionally
-// conservative: better to over-skip than to leak.
-//
-// Patterns covered:
-//   - .env, .env.*, *.env      (env files, possibly with prefixes)
-//   - *.pem, *.key             (TLS / SSH private keys)
-//   - id_rsa, id_rsa.*, id_dsa, id_dsa.*  (SSH private keys)
-//   - *.p12, *.pfx             (PKCS12 bundles)
-//   - credentials, *.gcp-key.json  (cloud creds)
-//   - netrc, .netrc            (curl/wget creds)
-func isSensitiveFilename(name string) bool {
-	lower := strings.ToLower(name)
-
-	// Direct substring matches first — cheap and unambiguous.
-	switch lower {
-	case ".env", "env", "envfile":
-		return true
-	case "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519":
-		return true
-	case "netrc", ".netrc":
-		return true
-	}
-	// Names that include the word "credentials" — common naming pattern
-	// for cloud service account / AWS / GCP credential files.
-	if strings.Contains(lower, "credentials") && strings.HasSuffix(lower, ".json") {
-		return true
-	}
-
-	// Suffix / prefix patterns.
-	if strings.HasSuffix(lower, ".env") {
-		return true
-	}
-	if strings.HasPrefix(lower, ".env") && (strings.Contains(lower, ".") || len(lower) > 4) {
-		// e.g. ".env.local", ".env.production"
-		return true
-	}
-	if strings.HasSuffix(lower, ".pem") || strings.HasSuffix(lower, ".key") {
-		return true
-	}
-	if strings.HasSuffix(lower, ".p12") || strings.HasSuffix(lower, ".pfx") {
-		return true
-	}
-	if strings.HasPrefix(lower, "id_rsa") || strings.HasPrefix(lower, "id_dsa") {
-		return true
-	}
-	if strings.HasSuffix(lower, "service-account.json") || strings.HasSuffix(lower, ".gcp-key.json") {
-		return true
-	}
-
-	return false
-}
-
-// containsSecret returns true if the given content contains a known
-// credential pattern. It does NOT log the matched content — only a
-// boolean. Patterns covered:
-//
-//   - OpenAI / Anthropic style:    sk-..., sk-ant-...
-//   - GitHub PAT:                  ghp_..., gho_..., ghu_..., ghs_...
-//   - Google API key:              AIza...
-//   - AWS access key:              AKIA...
-//   - Slack tokens:                xoxb-..., xoxp-...
-//   - Stripe live key:             sk_live_..., pk_live_...
-//   - Generic JWT:                 three base64url segments separated by dots
-//   - PEM private key headers:     "-----BEGIN ... PRIVATE KEY-----"
-func containsSecret(content string) bool {
-	patterns := []string{
-		"sk-", "sk_",
-		"sk-ant-",
-		"ghp_", "gho_", "ghu_", "ghs_", "ghr_",
-		"AIza",
-		"AKIA",
-		"xoxb-", "xoxp-", "xoxa-",
-		"sk_live_", "pk_live_",
-		"-----BEGIN", // generic PEM header (RSA, EC, OPENSSH, etc.)
-	}
-	lower := strings.ToLower(content)
-	for _, p := range patterns {
-		if strings.Contains(lower, strings.ToLower(p)) {
-			return true
-		}
-	}
-	return false
 }
 
 // --- SHADOW-015: Rule File Importer ---
@@ -357,15 +195,6 @@ func NewImporter() *Importer {
 
 // ImportFile reads a rule file and converts its content into candidate rules.
 func (imp *Importer) ImportFile(filePath string) ([]*storage.Rule, error) {
-	// Privacy guard 1: refuse to read files whose names look sensitive
-	// (e.g. ".env", "id_rsa", "*.pem"). Returning an empty result with
-	// nil error is intentional — the caller is told "no rules" not
-	// "something is wrong", because the file might have been added
-	// between two scan passes.
-	if isSensitiveFilename(filepath.Base(filePath)) {
-		return nil, nil
-	}
-
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
@@ -373,14 +202,6 @@ func (imp *Importer) ImportFile(filePath string) ([]*storage.Rule, error) {
 
 	content := string(data)
 	if strings.TrimSpace(content) == "" {
-		return nil, nil
-	}
-
-	// Privacy guard 2: refuse to import rules from files that contain
-	// known secret patterns (sk-..., ghp_..., AIza..., AKIA..., PEM
-	// headers, etc.). This is a second line of defense in case a
-	// non-obvious file name slipped past guard 1.
-	if containsSecret(content) {
 		return nil, nil
 	}
 

@@ -16,19 +16,12 @@ func NewSourceRepo(db *sql.DB) *SourceRepo {
 }
 
 // Create inserts a new source record.
-// An empty RuleID is stored as SQL NULL (not the empty string) so the
-// foreign key check is satisfied: the source is "unlinked" until the
-// distill engine links it to a real rule via LinkToRule.
 func (r *SourceRepo) Create(source *Source) error {
-	var ruleID sql.NullString
-	if source.RuleID != "" {
-		ruleID = sql.NullString{String: source.RuleID, Valid: true}
-	}
 	_, err := r.db.Exec(`
 		INSERT INTO sources (id, rule_id, signal_type, signal_strength, agent_name,
 		                     project_path, raw_snippet, timestamp, confidence_contribution)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		source.ID, ruleID, source.SignalType, source.SignalStrength,
+		source.ID, source.RuleID, source.SignalType, source.SignalStrength,
 		source.AgentName, source.ProjectPath, source.RawSnippet,
 		source.Timestamp, source.ConfidenceContribution,
 	)

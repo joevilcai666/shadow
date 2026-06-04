@@ -9,7 +9,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -69,25 +68,6 @@ var startCmd = &cobra.Command{
 			return printStatus(client)
 		}
 
-		// Port conflict retry: probe 7878 (and a few neighbors) for a
-		// free port. If the default is busy (e.g. another tool grabbed
-		// it), walk forward up to 5 ports. The chosen port is then
-		// passed to the daemon via the SHADOW_PORT env var so the
-		// child process binds the same port we probed.
-		port, err := daemon.TryPorts(7878, 5)
-		if err != nil {
-			return fmt.Errorf("port probe: %w", err)
-		}
-		if port != 7878 {
-			fmt.Printf("⚠ Port 7878 is in use, falling back to %d\n", port)
-			fmt.Println("  To free 7878, run: lsof -ti:7878 | xargs kill -9")
-		}
-		// Persist for the launchd plist (the daemon reads SHADOW_PORT
-		// from its environment at startup).
-		if err := os.Setenv("SHADOW_PORT", fmt.Sprintf("%d", port)); err != nil {
-			return fmt.Errorf("set SHADOW_PORT: %w", err)
-		}
-
 		// Install launchd plist.
 		home, _ := os.UserHomeDir()
 		execPath, _ := os.Executable()
@@ -98,13 +78,6 @@ var startCmd = &cobra.Command{
 			HomeDir:    home + "/.shadow",
 		}
 		if err := daemon.InstallLaunchd(cfg); err != nil {
-			// Permission issues (writing under ~/Library/LaunchAgents
-			// shouldn't require sudo, but we surface a friendly hint
-			// just in case the user is on a locked-down profile).
-			if os.IsPermission(err) {
-				fmt.Println("⚠ Permission denied writing the launchd plist.")
-				fmt.Println("  Try: sudo launchctl load -w ~/Library/LaunchAgents/com.shadow.daemon.plist")
-			}
 			return fmt.Errorf("install launchd: %w", err)
 		}
 		fmt.Println("✓ Shadow daemon registered with launchd")
@@ -112,15 +85,9 @@ var startCmd = &cobra.Command{
 		// Start via launchctl.
 		fmt.Println("Starting daemon...")
 		if err := daemon.LoadLaunchd("com.shadow.daemon"); err != nil {
-			// launchctl commonly returns a permission error if the
-			// user session is missing a security context.
-			if strings.Contains(err.Error(), "permission") || strings.Contains(err.Error(), "not privileged") {
-				fmt.Println("⚠ launchctl could not start the daemon.")
-				fmt.Println("  Try: sudo launchctl load -w ~/Library/LaunchAgents/com.shadow.daemon.plist")
-			}
 			return fmt.Errorf("start daemon: %w", err)
 		}
-		fmt.Printf("✓ Shadow daemon started (http://localhost:%d)\n", port)
+		fmt.Println("✓ Shadow daemon started")
 		fmt.Println()
 
 		// Launch onboarding TUI.
@@ -493,54 +460,14 @@ func findProjectContexts(home string) []string {
 	return dirs
 }
 
-var (
-	openURL          = "http://localhost:7878"
-	openHTTPTimeout  = 5 * time.Second
-	openPollInterval = 200 * time.Millisecond
-)
-
 var openCmd = &cobra.Command{
 	Use:   "open",
 	Short: "Open the Shadow web console in browser",
-	Long: `Open the Shadow web console in your default browser.
-
-If the daemon is not running, this command exits with an error
-instructing you to run 'shadow start' first. If the daemon is
-starting up (IPC socket up but HTTP server not yet bound), it polls
-briefly before giving up.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		client := daemon.NewClient()
-		if !client.IsRunning() {
-			return fmt.Errorf("Shadow daemon is not running.\n  Run 'shadow start' first, then 'shadow open'.")
-		}
-
-		if !waitForHTTP(openURL+"/api/dashboard", openHTTPTimeout) {
-			return fmt.Errorf("daemon is running (IPC up) but HTTP server didn't become ready in %s.\n  Try 'shadow status' or 'shadow restart'.", openHTTPTimeout)
-		}
-
-		fmt.Printf("Opening Shadow console at %s\n", openURL)
-		return exec.Command("open", openURL).Start()
+		url := "http://localhost:7878"
+		fmt.Printf("Opening Shadow console at %s\n", url)
+		return exec.Command("open", url).Start()
 	},
-}
-
-// waitForHTTP polls `url` until it returns HTTP 200, or `timeout`
-// elapses. Returns true on 200, false on timeout. Used by `shadow
-// open` to bridge the small window between IPC-socket-ready and
-// HTTP-listener-ready during daemon startup.
-func waitForHTTP(url string, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	client := &http.Client{Timeout: 500 * time.Millisecond}
-	for time.Now().Before(deadline) {
-		resp, err := client.Get(url)
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				return true
-			}
-		}
-		time.Sleep(openPollInterval)
-	}
-	return false
 }
 
 func init() {
