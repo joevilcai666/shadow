@@ -38,5 +38,9 @@ Thumbs.db
 .shadow/
 go.work
 
-# mavis plan workspace
-.mavis/
+# Local handoff document for coding agents (not committed)
+HANDOFF.md
+
+# Worktrees & temp
+.opencode/
+.worktrees/

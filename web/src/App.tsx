@@ -1,6 +1,6 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Layout from './components/Layout';
-import Dashboard from './pages/Dashboard';
+import MemoryMapPage from './pages/MemoryMapPage';
 import Rules from './pages/Rules';
 import Projects from './pages/Projects';
 import Settings from './pages/Settings';
@@ -20,7 +20,7 @@ export default function App() {
         <Route path="/*" element={
           <Layout>
             <Routes>
-              <Route path="/" element={<Dashboard />} />
+              <Route path="/" element={<MemoryMapPage />} />
               <Route path="/rules" element={<Rules />} />
               <Route path="/rules/:id" element={<RuleDetail />} />
               <Route path="/review" element={<Review />} />

@@ -1,0 +1,803 @@
+/* 记忆地图样式 — Calm Precision 设计语言 */
+/* 深色默认、克制、留白足、强调色克制 */
+
+:root {
+  --bg-canvas: #0A0A0F;
+  --bg-canvas-elevated: #0F0F18;
+  --surface: rgba(20, 20, 28, 0.85);
+  --surface-strong: rgba(15, 15, 22, 0.95);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text-primary: #ECECEC;
+  --text-secondary: #9CA3AF;
+  --text-tertiary: #6B7280;
+  --text-quaternary: #4B5563;
+
+  --brand: #8B5CF6;
+  --brand-dim: rgba(139, 92, 246, 0.18);
+  --brand-glow: rgba(139, 92, 246, 0.55);
+
+  /* 三类别色（Steve Jobs 简化：3 类别） */
+  --cat-code: #3B82F6;          /* blue */
+  --cat-architecture: #A78BFA;  /* violet (lighter for contrast on dark) */
+  --cat-practice: #10B981;      /* emerald */
+
+  /* 状态色 */
+  --status-active: #10B981;
+  --status-conflicted: #EF4444;
+  --status-other: #6B7280;
+
+  /* 关联线 */
+  --rel-strong: #A78BFA;
+  --rel-medium: #6B7280;
+  --rel-weak: #3B82F6;
+
+  /* 动效曲线（Emil 化：ease-out-expo 主导） */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 150ms;
+  --duration-base: 280ms;
+  --duration-slow: 400ms;
+}
+
+.mm-page {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-canvas);
+  overflow: hidden;
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+}
+
+/* 拖动期间：画布 cursor 也变成 grabbing，给整个画布一致的"握住"反馈 */
+.mm-page--dragging,
+.mm-page--dragging .mm-flow {
+  cursor: grabbing !important;
+}
+
+.mm-page--dragging .mm-flow .react-flow__pane {
+  cursor: grabbing !important;
+}
+
+/* === 画布背景：微星尘 === */
+.mm-canvas-bg {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 20% 30%, rgba(139, 92, 246, 0.04) 0%, transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(59, 130, 246, 0.03) 0%, transparent 50%),
+    var(--bg-canvas);
+  pointer-events: none;
+}
+
+.mm-stardust {
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(1px 1px at 12% 18%, rgba(255,255,255,0.06) 50%, transparent 100%),
+    radial-gradient(1px 1px at 27% 64%, rgba(255,255,255,0.04) 50%, transparent 100%),
+    radial-gradient(1px 1px at 53% 22%, rgba(255,255,255,0.05) 50%, transparent 100%),
+    radial-gradient(1px 1px at 71% 79%, rgba(255,255,255,0.04) 50%, transparent 100%),
+    radial-gradient(1px 1px at 88% 35%, rgba(255,255,255,0.06) 50%, transparent 100%),
+    radial-gradient(1px 1px at 33% 88%, rgba(255,255,255,0.04) 50%, transparent 100%),
+    radial-gradient(1px 1px at 62% 50%, rgba(255,255,255,0.05) 50%, transparent 100%);
+  pointer-events: none;
+}
+
+/* === React Flow 内部样式覆盖 === */
+.mm-flow {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.mm-flow .react-flow__background {
+  background: transparent;
+}
+
+.mm-flow .react-flow__attribution {
+  display: none;
+}
+
+.mm-flow .react-flow__controls {
+  background: var(--surface);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.mm-flow .react-flow__controls-button {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  width: 32px;
+  height: 32px;
+  transition: background var(--duration-fast) var(--ease-out-quart);
+}
+
+.mm-flow .react-flow__controls-button:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+}
+
+.mm-flow .react-flow__controls-button svg {
+  fill: currentColor;
+}
+
+.mm-flow .react-flow__minimap {
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.mm-flow .react-flow__edge-path {
+  transition: stroke-opacity var(--duration-base) var(--ease-out-expo);
+}
+
+.mm-flow .react-flow__edge.mm-edge--dimmed .react-flow__edge-path {
+  stroke-opacity: 0.12;
+}
+
+/* === 自定义节点 ===
+ * Transform 类（scale/translate）交给 framer-motion，CSS 只管 filter / box-shadow / cursor
+ * 否则 framer-motion 的 style.x/y 会跟 CSS transform 冲突
+ */
+.mm-node {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  transform-origin: center;
+  will-change: transform, filter;
+  transition: filter var(--duration-base) var(--ease-out-expo);
+}
+
+.mm-node:hover {
+  filter: brightness(1.15);
+  z-index: 10;
+}
+
+.mm-node--selected {
+  z-index: 20;
+}
+
+.mm-node--selected .mm-node-shape {
+  filter: brightness(1.2) drop-shadow(0 0 10px var(--brand-glow));
+}
+
+.mm-node--dragging {
+  cursor: grabbing;
+  z-index: 50;
+  filter: brightness(1.2) drop-shadow(0 8px 24px rgba(139, 92, 246, 0.5));
+}
+
+.mm-node--dragging .mm-node-shape {
+  filter: brightness(1.3) drop-shadow(0 0 18px var(--brand-glow));
+}
+
+.mm-node--dimmed {
+  opacity: 0.18;
+  filter: saturate(0.4);
+  pointer-events: none;
+}
+
+.mm-node-label {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  text-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
+  letter-spacing: 0.01em;
+}
+
+.mm-node--selected .mm-node-label,
+.mm-node:hover .mm-node-label {
+  color: var(--text-primary);
+}
+
+/* 状态指示器：右上角小点 */
+.mm-node-status {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--bg-canvas);
+}
+
+.mm-node-status--active {
+  background: var(--status-active);
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+}
+
+.mm-node-status--conflicted {
+  background: var(--status-conflicted);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.8);
+  /* 单一 pulse — Emil 化：选中或悬停时显示 */
+  animation: mm-conflict-pulse 1.4s var(--ease-out-quart) infinite;
+}
+
+.mm-node-status--other {
+  background: var(--status-other);
+  opacity: 0.5;
+}
+
+@keyframes mm-conflict-pulse {
+  0%, 100% { box-shadow: 0 0 4px rgba(239, 68, 68, 0.6); }
+  50% { box-shadow: 0 0 12px rgba(239, 68, 68, 1); }
+}
+
+/* === HUD === */
+.mm-hud {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(80%, 960px);
+  background: var(--surface);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  z-index: 30;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* 入场动画 */
+  animation: mm-hud-in 600ms var(--ease-out-expo) both;
+}
+
+@keyframes mm-hud-in {
+  from { opacity: 0; transform: translate(-50%, -16px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+.mm-hud-stats {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+
+.mm-hud-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.mm-hud-stat-value {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mm-hud-stat-value--accent { color: var(--brand); }
+.mm-hud-stat-value--warn { color: var(--status-conflicted); }
+
+.mm-hud-divider {
+  width: 1px;
+  height: 12px;
+  background: var(--border);
+}
+
+.mm-hud-growth {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.mm-hud-growth-bar {
+  flex: 1;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+
+.mm-hud-growth-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--brand), var(--cat-architecture));
+  border-radius: 2px;
+  transition: width 800ms var(--ease-out-expo);
+}
+
+.mm-hud-achievements {
+  display: flex;
+  gap: 8px;
+}
+
+.mm-hud-achievement {
+  font-size: 14px;
+  opacity: 0.3;
+  filter: grayscale(1);
+  transition: all var(--duration-base) var(--ease-out-quart);
+  cursor: default;
+}
+
+.mm-hud-achievement--unlocked {
+  opacity: 1;
+  filter: grayscale(0);
+}
+
+.mm-hud-achievement--unlocked:hover {
+  transform: scale(1.2);
+}
+
+.mm-hud-search-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.mm-hud-search {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  transition: all var(--duration-fast) var(--ease-out-quart);
+}
+
+.mm-hud-search:focus-within {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--border-strong);
+}
+
+.mm-hud-search-icon {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.mm-hud-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.mm-hud-search-input::placeholder {
+  color: var(--text-quaternary);
+}
+
+.mm-hud-search-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.mm-hud-chips {
+  display: flex;
+  gap: 6px;
+}
+
+.mm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out-quart);
+  user-select: none;
+}
+
+.mm-chip:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-primary);
+}
+
+.mm-chip--active {
+  background: var(--brand-dim);
+  border-color: var(--brand);
+  color: var(--text-primary);
+}
+
+.mm-chip-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.mm-chip-dot--code { background: var(--cat-code); }
+.mm-chip-dot--architecture { background: var(--cat-architecture); }
+.mm-chip-dot--practice { background: var(--cat-practice); }
+
+/* === 侧边抽屉 === */
+.mm-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 400px;
+  background: var(--surface-strong);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border-left: 1px solid var(--border);
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  animation: mm-drawer-in 320ms var(--ease-out-expo) both;
+  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes mm-drawer-in {
+  from { opacity: 0; transform: translateX(40px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.mm-drawer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.mm-drawer-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mm-drawer-cat-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.mm-drawer-cat-badge--code { color: var(--cat-code); background: rgba(59, 130, 246, 0.1); }
+.mm-drawer-cat-badge--architecture { color: var(--cat-architecture); background: rgba(167, 139, 250, 0.1); }
+.mm-drawer-cat-badge--practice { color: var(--cat-practice); background: rgba(16, 185, 129, 0.1); }
+
+.mm-drawer-close {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  transition: all var(--duration-fast) var(--ease-out-quart);
+}
+
+.mm-drawer-close:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.mm-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.mm-drawer-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.mm-drawer-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.mm-drawer-body::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+
+.mm-drawer-section-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-tertiary);
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.mm-drawer-content {
+  font-family: 'JetBrains Mono', 'Menlo', monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-primary);
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.mm-drawer-meta {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 8px 12px;
+  font-size: 12px;
+}
+
+.mm-drawer-meta-label {
+  color: var(--text-tertiary);
+}
+
+.mm-drawer-meta-value {
+  color: var(--text-primary);
+}
+
+.mm-confidence {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mm-confidence-bar {
+  flex: 1;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.mm-confidence-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #475569, #94A3B8);
+  border-radius: 2px;
+  transition: width 600ms var(--ease-out-expo);
+}
+
+.mm-confidence-value {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  font-size: 11px;
+  min-width: 32px;
+  text-align: right;
+}
+
+.mm-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.mm-tag {
+  font-family: 'JetBrains Mono', 'Menlo', monospace;
+  font-size: 10.5px;
+  padding: 2px 7px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+}
+
+.mm-agents {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mm-agent-pill {
+  font-size: 10.5px;
+  padding: 3px 8px;
+  background: var(--brand-dim);
+  color: var(--brand);
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+/* 纠正溯源（替代 Level 4） */
+.mm-source-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mm-source-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  flex-wrap: wrap;
+}
+
+.mm-source-snippet {
+  font-family: 'JetBrains Mono', 'Menlo', monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.3);
+  padding: 8px 10px;
+  border-radius: 6px;
+  border-left: 2px solid var(--brand);
+}
+
+/* === 图例（浮动在画布左下） === */
+.mm-legend {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  background: var(--surface);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  animation: mm-hud-in 800ms var(--ease-out-expo) 200ms both;
+}
+
+.mm-legend-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mm-legend-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.mm-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mm-legend-swatch {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.mm-legend-line {
+  width: 24px;
+  height: 0;
+  flex-shrink: 0;
+}
+
+.mm-legend-line--strong { border-top: 2px solid var(--rel-strong); }
+.mm-legend-line--medium { border-top: 1px solid var(--rel-medium); }
+.mm-legend-line--weak { border-top: 1px dashed var(--rel-weak); }
+
+/* === 提示 toast === */
+.mm-toast {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface-strong);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 10px 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+  z-index: 40;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  animation: mm-toast-in 400ms var(--ease-out-expo) both,
+             mm-toast-out 400ms var(--ease-out-expo) 2400ms forwards;
+}
+
+.mm-toast-icon {
+  font-size: 16px;
+}
+
+@keyframes mm-toast-in {
+  from { opacity: 0; transform: translate(-50%, 12px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@keyframes mm-toast-out {
+  to { opacity: 0; transform: translate(-50%, 12px); }
+}
+
+/* === 空状态（首条记忆诞生前的示例） === */
+.mm-empty-hint {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  z-index: 20;
+  text-align: center;
+  max-width: 360px;
+}
+
+.mm-empty-hint-title {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.mm-empty-hint-cta {
+  font-size: 11px;
+  color: var(--brand);
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.mm-empty-hint-cta:hover {
+  text-decoration: underline;
+}
+
+/* 减少动效偏好（无障碍） */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
