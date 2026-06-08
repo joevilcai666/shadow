@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // RuleRepo handles CRUD operations for rules.
@@ -265,10 +266,53 @@ func scanRuleFromRows(rows *sql.Rows) (*Rule, error) {
 	return &rule, nil
 }
 
-// computeDiff produces a simple diff string between old and new content.
+// computeDiff produces a unified-diff-style string between two rule
+// contents. It splits both inputs by line and runs a simple LCS-based
+// diff, emitting "-old" for removed lines and "+new" for added lines.
+// Context lines (those present on both sides) are emitted unchanged so
+// the result is readable in the rule-history UI. Returns an empty
+// string when the two contents are identical.
 func computeDiff(old, new string) string {
 	if old == new {
 		return ""
 	}
-	return fmt.Sprintf("-%s\n+%s", old, new)
+	oldLines := strings.Split(old, "\n")
+	newLines := strings.Split(new, "\n")
+
+	// Build the LCS table.
+	m, n := len(oldLines), len(newLines)
+	lcs := make([][]int, m+1)
+	for i := range lcs {
+		lcs[i] = make([]int, n+1)
+	}
+	for i := 1; i <= m; i++ {
+		for j := 1; j <= n; j++ {
+			if oldLines[i-1] == newLines[j-1] {
+				lcs[i][j] = lcs[i-1][j-1] + 1
+			} else if lcs[i-1][j] >= lcs[i][j-1] {
+				lcs[i][j] = lcs[i-1][j]
+			} else {
+				lcs[i][j] = lcs[i][j-1]
+			}
+		}
+	}
+
+	// Walk the table backwards to emit the diff.
+	var sb strings.Builder
+	i, j := m, n
+	for i > 0 || j > 0 {
+		switch {
+		case i > 0 && j > 0 && oldLines[i-1] == newLines[j-1]:
+			sb.WriteString(" " + oldLines[i-1] + "\n")
+			i--
+			j--
+		case j > 0 && (i == 0 || lcs[i][j-1] >= lcs[i-1][j]):
+			sb.WriteString("+" + newLines[j-1] + "\n")
+			j--
+		default:
+			sb.WriteString("-" + oldLines[i-1] + "\n")
+			i--
+		}
+	}
+	return sb.String()
 }

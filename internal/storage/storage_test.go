@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -401,5 +402,37 @@ func TestProjectCRUD(t *testing.T) {
 	deleted, _ := repo.GetByID(project.ID)
 	if deleted != nil {
 		t.Error("expected nil after delete")
+	}
+}
+
+func TestComputeDiff(t *testing.T) {
+	// Identical inputs return empty.
+	if got := computeDiff("same", "same"); got != "" {
+		t.Errorf("identical: got %q, want empty", got)
+	}
+
+	// Pure addition: 'a' is common so it appears as context, 'b' is new
+	// so it appears as +b.
+	got := computeDiff("a", "a\nb")
+	if !strings.Contains(got, " a\n") {
+		t.Errorf("addition diff missing shared context: %q", got)
+	}
+	if !strings.Contains(got, "+b") {
+		t.Errorf("addition diff missing +b marker: %q", got)
+	}
+
+	// Pure change.
+	got = computeDiff("foo\nbar", "foo\nbaz")
+	if !strings.Contains(got, "-bar") || !strings.Contains(got, "+baz") {
+		t.Errorf("change diff missing markers: %q", got)
+	}
+	if !strings.Contains(got, " foo") {
+		t.Errorf("context line missing: %q", got)
+	}
+
+	// Multi-line common prefix/suffix preserved as context.
+	got = computeDiff("a\nb\nc", "a\nX\nc")
+	if !strings.Contains(got, " a") || !strings.Contains(got, " c") {
+		t.Errorf("context not preserved on multi-line diff: %q", got)
 	}
 }

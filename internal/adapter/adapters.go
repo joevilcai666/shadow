@@ -83,17 +83,41 @@ type CursorAdapter struct {
 
 // NewCursorAdapter creates a new Cursor adapter.
 func NewCursorAdapter(backupDir string) *CursorAdapter {
+	home, _ := os.UserHomeDir()
 	return &CursorAdapter{
 		mb:      NewManagedBlock(backupDir),
-		homeDir: "/Applications/Cursor.app",
+		homeDir: home,
 	}
 }
 
 func (a *CursorAdapter) Name() string { return "cursor" }
 
+// IsInstalled reports whether a Cursor install can be found on this
+// machine. The check is platform-aware:
+//   - macOS: /Applications/Cursor.app
+//   - Linux: ~/.local/share/cursor (Cursor's XDG_STATE_HOME)
+//   - Windows: %LOCALAPPDATA%\Programs\Cursor
+// The legacy "always-installed" Cursor that wrote ai/ JSONL under
+// ~/Library/Application Support/Cursor is still detected by the
+// cursor.go parser's path probe, so users with the older install get
+// capture either way.
 func (a *CursorAdapter) IsInstalled() bool {
-	_, err := os.Stat(a.homeDir)
-	return err == nil
+	candidates := []string{
+		"/Applications/Cursor.app", // macOS
+		filepath.Join(a.homeDir, ".local", "share", "cursor"),  // Linux
+		filepath.Join(a.homeDir, "AppData", "Local", "Programs", "Cursor"), // Windows
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	// Fallback: ~/.cursor directory exists (used by some user-managed
+	// installs and the Cursor CLI on every platform).
+	if _, err := os.Stat(filepath.Join(a.homeDir, ".cursor")); err == nil {
+		return true
+	}
+	return false
 }
 
 func (a *CursorAdapter) WriteRules(rules []*storage.Rule, scope, projectPath string) error {
