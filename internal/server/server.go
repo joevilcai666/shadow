@@ -113,6 +113,7 @@ func (s *Server) routes() {
 	// Capture
 	api.HandleFunc("/capture/toggle", s.toggleCapture).Methods("POST")
 	api.HandleFunc("/capture/status", s.captureStatus).Methods("GET")
+	api.HandleFunc("/capture/git-signal", s.gitSignal).Methods("POST")
 
 	// Adapters
 	api.HandleFunc("/adapters", s.listAdapters).Methods("GET")
@@ -496,6 +497,59 @@ func (s *Server) captureStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// gitSignal ingests a signal posted by a Shadow-installed git hook (see
+// internal/capture/git_hooks.go). The hook posts when the user does
+// `git checkout` (reset/revert) or `git rebase/amend` (rewrite). These
+// events are strong signals that the user is correcting prior agent output.
+func (s *Server) gitSignal(w http.ResponseWriter, r *http.Request) {
+	var payload struct {
+		Type string `json:"type"`
+		Pwd  string `json:"pwd"`
+		Prev string `json:"prev"`
+		New  string `json:"new"`
+		Op   string `json:"op"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	// Build a human-readable snippet describing the git event.
+	var snippet string
+	switch payload.Type {
+	case "git_checkout":
+		snippet = fmt.Sprintf("git checkout from %s to %s in %s", payload.Prev, payload.New, payload.Pwd)
+	case "git_rewrite":
+		snippet = fmt.Sprintf("git %s (rewrite) in %s", payload.Op, payload.Pwd)
+	default:
+		snippet = fmt.Sprintf("git event %s in %s", payload.Type, payload.Pwd)
+	}
+
+	// Privacy check.
+	if found, pattern := s.configMgr.ContainsSensitiveData(snippet); found {
+		writeError(w, http.StatusBadRequest, "git signal contains sensitive data matching pattern: "+pattern)
+		return
+	}
+
+	source := &storage.Source{
+		ID:                    storage.NewID(),
+		SignalType:            "git_revert",
+		SignalStrength:        "strong",
+		AgentName:             "git",
+		ProjectPath:           payload.Pwd,
+		RawSnippet:            snippet,
+		Timestamp:             storage.Now(),
+		ConfidenceContribution: 0.7,
+	}
+	if err := s.sourceRepo.Create(source); err != nil {
+		writeError(w, http.StatusInternalServerError, "create source: "+err.Error())
+		return
+	}
+
+	s.wsHub.Broadcast(map[string]any{"event": "source.created", "source_id": source.ID, "agent": "git"})
+	writeJSON(w, http.StatusCreated, source)
+}
+
 // --- WebSocket ---
 
 var upgrader = websocket.Upgrader{
@@ -541,6 +595,13 @@ func (s *Server) listAdapters(w http.ResponseWriter, r *http.Request) {
 			"enabled":     s.configMgr.Get().Adapters.Codex.Enabled,
 			"target_path": "AGENTS.md (project) + ~/AGENTS.md (global)",
 		},
+		{
+			"name":        "copilot",
+			"label":       "GitHub Copilot",
+			"installed":   adapter.NewCopilotAdapter(backupDir).IsInstalled(),
+			"enabled":     s.configMgr.Get().Adapters.Copilot.Enabled,
+			"target_path": ".github/copilot-instructions.md (project) + ~/.copilot/instructions.md (global)",
+		},
 	}
 
 	writeJSON(w, http.StatusOK, adapters)
@@ -564,6 +625,8 @@ func (s *Server) toggleAdapter(w http.ResponseWriter, r *http.Request) {
 		cfg.Adapters.Cursor.Enabled = req.Enabled
 	case "codex":
 		cfg.Adapters.Codex.Enabled = req.Enabled
+	case "copilot":
+		cfg.Adapters.Copilot.Enabled = req.Enabled
 	default:
 		writeError(w, http.StatusNotFound, "adapter not found: "+name)
 		return

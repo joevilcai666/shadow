@@ -265,3 +265,60 @@ func TestMCPRoutesMounted(t *testing.T) {
 		t.Error("MCP tools should return non-empty tools list")
 	}
 }
+
+func TestGitSignalHandler(t *testing.T) {
+	s, db := testEnv(t)
+
+	// Checkout event.
+	body := bytes.NewReader([]byte(`{"type":"git_checkout","pwd":"/tmp/repo","prev":"abc123","new":"def456"}`))
+	req := newLocalRequest("POST", "/api/capture/git-signal", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("git-signal status: got %d, want %d. body: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+
+	var stored storage.Source
+	if err := json.NewDecoder(w.Body).Decode(&stored); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if stored.SignalType != "git_revert" {
+		t.Errorf("SignalType = %q, want git_revert", stored.SignalType)
+	}
+	if stored.AgentName != "git" {
+		t.Errorf("AgentName = %q, want git", stored.AgentName)
+	}
+	if stored.SignalStrength != "strong" {
+		t.Errorf("SignalStrength = %q, want strong", stored.SignalStrength)
+	}
+
+	// Verify it actually landed in the DB.
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM sources WHERE agent_name='git'").Scan(&count); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("db sources count = %d, want 1", count)
+	}
+
+	// Rewrite event.
+	body2 := bytes.NewReader([]byte(`{"type":"git_rewrite","op":"rebase","pwd":"/tmp/repo"}`))
+	req2 := newLocalRequest("POST", "/api/capture/git-signal", body2)
+	req2.Header.Set("Content-Type", "application/json")
+	w2 := httptest.NewRecorder()
+	s.router.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusCreated {
+		t.Errorf("rewrite status: got %d, want %d", w2.Code, http.StatusCreated)
+	}
+
+	// Bad JSON.
+	req3 := newLocalRequest("POST", "/api/capture/git-signal", bytes.NewReader([]byte(`not json`)))
+	req3.Header.Set("Content-Type", "application/json")
+	w3 := httptest.NewRecorder()
+	s.router.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusBadRequest {
+		t.Errorf("bad json status: got %d, want %d", w3.Code, http.StatusBadRequest)
+	}
+}
