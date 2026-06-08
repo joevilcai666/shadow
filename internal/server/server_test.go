@@ -322,3 +322,86 @@ func TestGitSignalHandler(t *testing.T) {
 		t.Errorf("bad json status: got %d, want %d", w3.Code, http.StatusBadRequest)
 	}
 }
+
+func TestDashboardMapEmpty(t *testing.T) {
+	s, _ := testEnv(t)
+	req := newLocalRequest("GET", "/api/dashboard/map", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusOK)
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, ok := resp["nodes"].([]any); !ok {
+		t.Error("expected nodes array")
+	}
+	if _, ok := resp["edges"].([]any); !ok {
+		t.Error("expected edges array")
+	}
+}
+
+func TestDashboardMapEdgesFromTagOverlap(t *testing.T) {
+	s, _ := testEnv(t)
+
+	// Two rules sharing the "pnpm" tag should produce a medium edge.
+	for i, content := range []string{"Use pnpm not npm", "Always commit lockfile"} {
+		body, _ := json.Marshal(map[string]any{
+			"content": content,
+			"scope":   "global",
+			"tags":    []string{"pnpm"},
+			"category":   "toolchain",
+			"confidence": 0.9,
+			"status":     "active",
+		})
+		_ = i
+		req := newLocalRequest("POST", "/api/rules", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.router.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("seed rule %d status: %d", i, w.Code)
+		}
+	}
+
+	// A third rule with no shared tags — should NOT be linked.
+	body, _ := json.Marshal(map[string]any{
+		"content": "Use camelCase not snake_case",
+		"scope":   "global",
+		"tags":    []string{"naming"},
+		"category":   "style",
+		"confidence": 0.7,
+		"status":     "active",
+	})
+	req := newLocalRequest("POST", "/api/rules", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("seed third rule: %d", w.Code)
+	}
+
+	req = newLocalRequest("GET", "/api/dashboard/map", nil)
+	w = httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("map status: %d", w.Code)
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	edges := resp["edges"].([]any)
+	if len(edges) != 1 {
+		t.Errorf("edges = %d, want 1 (only the pnpm pair should be linked)", len(edges))
+	}
+	if len(edges) == 1 {
+		e := edges[0].(map[string]any)
+		data := e["data"].(map[string]any)
+		if data["kind"] != "medium" {
+			t.Errorf("edge kind = %v, want medium (1 shared tag)", data["kind"])
+		}
+	}
+}
