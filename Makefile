@@ -3,7 +3,7 @@
 # Build variables
 BINARY_NAME := shadow
 VERSION ?= $(shell grep 'Version' version.go | cut -d'"' -f2)
-LDFLAGS := -ldflags "-X github.com/joevilcai666/shadow/shadow.Version=$(VERSION)"
+LDFLAGS := -ldflags "-X github.com/joevilcai666/shadow.Version=$(VERSION)"
 GO := go
 GOFLAGS :=
 
