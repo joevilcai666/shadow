@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -464,7 +465,14 @@ var openCmd = &cobra.Command{
 	Use:   "open",
 	Short: "Open the Shadow web console in browser",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		url := "http://localhost:7878"
+		client := daemon.NewClient()
+		if !client.IsRunning() {
+			return fmt.Errorf("Shadow daemon is not running. Start it with 'shadow start'.")
+		}
+		if err := client.WaitForHTTP(10 * time.Second); err != nil {
+			return fmt.Errorf("daemon is up but HTTP is not responding: %w", err)
+		}
+		url := client.HTTPURL()
 		fmt.Printf("Opening Shadow console at %s\n", url)
 		return exec.Command("open", url).Start()
 	},
