@@ -51,6 +51,7 @@ type AdaptersConfig struct {
 	ClaudeCode AdapterConfig `yaml:"claude_code"`
 	Cursor     AdapterConfig `yaml:"cursor"`
 	Codex      AdapterConfig `yaml:"codex"`
+	Copilot    AdapterConfig `yaml:"copilot"`
 }
 
 // AdapterConfig is per-adapter configuration.
@@ -113,6 +114,7 @@ func DefaultConfig() *Config {
 			ClaudeCode: AdapterConfig{Enabled: true, GlobalPath: "~/.claude/CLAUDE.md"},
 			Cursor:     AdapterConfig{Enabled: true},
 			Codex:      AdapterConfig{Enabled: true},
+			Copilot:    AdapterConfig{Enabled: true},
 		},
 		Server: ServerConfig{
 			Port: 7878,

@@ -119,6 +119,53 @@ func TestCursorAdapterTargetPath(t *testing.T) {
 	}
 }
 
+func TestCopilotAdapterTargetPath(t *testing.T) {
+	a := &CopilotAdapter{mb: NewManagedBlock(filepath.Join(t.TempDir(), "backups"))}
+
+	project := a.TargetPath("project", "/tmp/myproj")
+	if project != "/tmp/myproj/.github/copilot-instructions.md" {
+		t.Errorf("project path: %q, want /tmp/myproj/.github/copilot-instructions.md", project)
+	}
+
+	if !a.IsInstalled() {
+		t.Error("Copilot IsInstalled should be true (treats Copilot as always-available)")
+	}
+}
+
+func TestCopilotAdapterWriteAndRemove(t *testing.T) {
+	dir := t.TempDir()
+	a := NewCopilotAdapter(filepath.Join(dir, "backups"))
+
+	rules := []*storage.Rule{
+		{ID: "r1", Content: "Use pnpm not npm", Status: "active", Confidence: 0.9},
+	}
+	if err := a.WriteRules(rules, "project", dir); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	// Verify file exists with managed block markers.
+	target := a.TargetPath("project", dir)
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(data), "# >>> shadow managed >>>") {
+		t.Error("managed block marker missing")
+	}
+	if !strings.Contains(string(data), "Use pnpm not npm") {
+		t.Error("rule content missing")
+	}
+
+	// Remove and verify managed block is gone.
+	if err := a.RemoveRules("project", dir); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	data, _ = os.ReadFile(target)
+	if strings.Contains(string(data), "Use pnpm not npm") {
+		t.Error("rule should be gone after RemoveRules")
+	}
+}
+
 func TestRulesToEntries(t *testing.T) {
 	rules := []*storage.Rule{
 		{Content: "Active", Status: "active", Confidence: 0.9},
