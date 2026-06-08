@@ -154,6 +154,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 	sourceRepo := storage.NewSourceRepo(db)
 	d.captureEngine = capture.NewEngine(cfgMgr, sourceRepo, ruleRepo, d.homeDir)
 	d.captureEngine.RegisterParser(capture.NewClaudeCodeParser())
+	d.captureEngine.RegisterParser(capture.NewCodexParser())
+	d.captureEngine.RegisterParser(capture.NewCursorParser())
 
 	// Start distill engine â use LLM if API key configured, else rule-based.
 	var distiller distill.Distiller
@@ -181,6 +183,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		adapter.NewClaudeCodeAdapter(backupDir),
 		adapter.NewCursorAdapter(backupDir),
 		adapter.NewCodexAdapter(backupDir),
+		adapter.NewCopilotAdapter(backupDir),
 	}
 	slog.Info("adapters initialized", "count", len(d.adapters))
 
