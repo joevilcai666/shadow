@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"sync"
@@ -59,9 +60,34 @@ func (h *WebSocketHub) Broadcast(msg any) {
 	}
 }
 
-// Run starts the hub's cleanup loop (currently a no-op placeholder).
-func (h *WebSocketHub) Run() {
-	// Could add periodic ping/pong cleanup here.
+// Run starts the hub's cleanup loop. It blocks until ctx is cancelled.
+// Currently the loop is a 30s ticker that pings every connected client
+// to drop half-dead connections (browser tab closed, network dropped,
+// etc.); without this, the daemon's client count would silently grow.
+func (h *WebSocketHub) Run(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			h.pingAll()
+		}
+	}
+}
+
+// pingAll sends a websocket ping frame to every client; those that fail
+// to respond are dropped from the registry.
+func (h *WebSocketHub) pingAll() {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for c := range h.clients {
+		_ = c.conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
+		if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			go h.Unregister(c)
+		}
+	}
 }
 
 // WSClient represents a single WebSocket connection.

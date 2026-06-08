@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/joevilcai666/shadow/internal/adapter"
@@ -404,4 +406,59 @@ func TestDashboardMapEdgesFromTagOverlap(t *testing.T) {
 			t.Errorf("edge kind = %v, want medium (1 shared tag)", data["kind"])
 		}
 	}
+}
+
+func TestWebSocketBroadcastDelivers(t *testing.T) {
+	hub := NewWebSocketHub()
+	go hub.Run(context.Background())
+
+	// Simulate a registered client: a buffered channel feeding WritePump.
+	client := &WSClient{send: make(chan []byte, 4)}
+	hub.Register(client)
+
+	hub.Broadcast(map[string]any{"event": "test", "n": 42})
+
+	select {
+	case got := <-client.send:
+		var msg map[string]any
+		if err := json.Unmarshal(got, &msg); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if msg["event"] != "test" {
+			t.Errorf("event = %v, want test", msg["event"])
+		}
+		// JSON numbers come back as float64.
+		if n, _ := msg["n"].(float64); n != 42 {
+			t.Errorf("n = %v, want 42", msg["n"])
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for broadcast")
+	}
+
+	hub.Unregister(client)
+}
+
+func TestWebSocketBroadcastDropsSlowClient(t *testing.T) {
+	hub := NewWebSocketHub()
+
+	// Tiny buffer (1) + a client that never drains it. The second broadcast
+	// should hit the 'default' branch in Broadcast and unregister the client.
+	client := &WSClient{send: make(chan []byte, 1)}
+	hub.Register(client)
+
+	hub.Broadcast(map[string]any{"event": "first"}) // fills the buffer
+	hub.Broadcast(map[string]any{"event": "second"}) // should be dropped
+
+	// Unregister runs in a goroutine; give it a beat.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		hub.mu.RLock()
+		_, still := hub.clients[client]
+		hub.mu.RUnlock()
+		if !still {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Error("slow client should have been unregistered after a dropped broadcast")
 }
