@@ -53,9 +53,44 @@ export default function Welcome() {
     navigate('/');
   };
 
-  // Demo data — uses real rules if available
-  const demoRules = rules.slice(0, 2);
-  const demoExample = demoRules.length > 0 ? demoRules[0].content : 'use pnpm instead of npm';
+  // Demo data — cycles through the user's real rules if available,
+  // otherwise falls back to a built-in roster of examples.
+  const SEED_EXAMPLES: { task: string; before: string[]; after: string[]; memory: string }[] = [
+    {
+      task: 'Add a dependency installation script',
+      before: ['$ npm install express', '✗ Used npm (you corrected this before)', '✗ Did not follow your project conventions'],
+      after:  ['$ pnpm add express',         '✓ Automatically used pnpm',           '✓ Followed your project conventions'],
+      memory: '本项目使用 pnpm，不要用 npm/yarn',
+    },
+    {
+      task: 'Name a new utility file',
+      before: ['src/string_utils.ts',         '✗ Used snake_case (you said camelCase)', '✗ Did not respect the project naming convention'],
+      after:  ['src/stringUtils.ts',          '✓ Used camelCase',                       '✓ Matches the project naming rule'],
+      memory: '本项目使用 camelCase 命名，禁止 snake_case',
+    },
+    {
+      task: 'Write a test for a new function',
+      before: ['import { test } from "jest"',  '✗ Used jest (project uses vitest)',   '✗ Has to be rewritten before CI runs'],
+      after:  ['import { test } from "vitest"', '✓ Switched to vitest',                '✓ Matches the project testing stack'],
+      memory: '测试用 vitest，不用 jest',
+    },
+    {
+      task: 'Handle an error in a fetch call',
+      before: ['throw new Error("network failed")', '✗ Throws across the data layer', '✗ Violates your error-handling convention'],
+      after:  ['return Err("network failed")',       '✓ Returns Result type',         '✓ Matches your architecture rule'],
+      memory: '错误处理优先使用 Result 类型而非 throw',
+    },
+  ];
+
+  const userExamples = rules.slice(0, 4).map(r => ({
+    task: 'Your captured rule',
+    before: ['agent does the wrong thing', `✗ Violates "${r.content}"`],
+    after:  ['agent follows the rule',     `✓ Honors "${r.content.slice(0, 32)}…"`],
+    memory: r.content,
+  }));
+  const examples = userExamples.length > 0 ? userExamples : SEED_EXAMPLES;
+  const [demoIndex, setDemoIndex] = useState(0);
+  const demoExample = examples[demoIndex % examples.length];
 
   if (loading) {
     return (
@@ -174,7 +209,18 @@ export default function Welcome() {
         {step === 'demo' && (
           <div>
             <h1 className="text-2xl font-bold mb-2">See the Difference</h1>
-            <p className="text-gray-400 mb-8">Here's how Shadow helps your agents get it right the first time.</p>
+            <p className="text-gray-400 mb-2">Same task, two agents. The one on the right has Shadow.</p>
+            <p className="text-xs text-gray-500 mb-8">
+              Task: <span className="text-gray-300">{demoExample.task}</span>
+              {examples.length > 1 && (
+                <button
+                  onClick={() => setDemoIndex((demoIndex + 1) % examples.length)}
+                  className="ml-3 underline hover:text-gray-300"
+                >
+                  重新演示 ({demoIndex + 1}/{examples.length})
+                </button>
+              )}
+            </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
               {/* Without Shadow */}
@@ -183,10 +229,10 @@ export default function Welcome() {
                   <XCircle size={18} className="text-red-400" />
                   <h3 className="font-semibold text-red-400">Without Shadow</h3>
                 </div>
-                <div className="bg-gray-950 rounded-lg p-4 font-mono text-sm">
-                  <p className="text-red-400">$ npm install express</p>
-                  <p className="text-gray-500 mt-2">✗ Used npm (you corrected this before)</p>
-                  <p className="text-gray-500">✗ Didn't follow your project conventions</p>
+                <div className="bg-gray-950 rounded-lg p-4 font-mono text-sm space-y-1">
+                  {demoExample.before.map((line, i) => (
+                    <p key={i} className={i === 0 ? 'text-red-300' : 'text-gray-500'}>{line}</p>
+                  ))}
                 </div>
               </div>
 
@@ -196,13 +242,13 @@ export default function Welcome() {
                   <CheckCircle size={18} className="text-green-400" />
                   <h3 className="font-semibold text-green-400">With Shadow</h3>
                 </div>
-                <div className="bg-gray-950 rounded-lg p-4 font-mono text-sm">
-                  <p className="text-green-400">$ pnpm add express</p>
-                  <p className="text-gray-500 mt-2">✓ Automatically used pnpm</p>
-                  <p className="text-gray-500">✓ Followed your project conventions</p>
+                <div className="bg-gray-950 rounded-lg p-4 font-mono text-sm space-y-1">
+                  {demoExample.after.map((line, i) => (
+                    <p key={i} className={i === 0 ? 'text-green-300' : 'text-gray-500'}>{line}</p>
+                  ))}
                 </div>
                 <div className="mt-3 text-xs text-purple-400">
-                  ✓ Memory hit: "{demoExample}"
+                  ✓ Memory hit: "{demoExample.memory}"
                 </div>
               </div>
             </div>
