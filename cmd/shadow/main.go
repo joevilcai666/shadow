@@ -478,6 +478,44 @@ var openCmd = &cobra.Command{
 	},
 }
 
+// mcpCmd prints the configuration snippet to wire Shadow as an MCP server
+// in an agent host (Claude Desktop, Continue, etc.). The HTTP transport
+// at /mcp is already mounted by the running daemon; this command exists
+// so users can copy/paste the wiring without reading source.
+var mcpCmd = &cobra.Command{
+	Use:   "mcp",
+	Short: "Print MCP server wiring for agent hosts",
+	Long: "Print the JSON snippet to add Shadow as an MCP server in a host like\n" +
+		"Claude Desktop or Continue. Shadow speaks MCP over HTTP at the\n" +
+		"address printed below (the daemon must be running).\n\n" +
+		"For stdio transport (e.g. Claude Desktop stdio servers), run:\n" +
+		"  shadow serve --stdio-mcp\n" +
+		" — not yet implemented; use the HTTP form for now.",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client := daemon.NewClient()
+		if !client.IsRunning() {
+			return fmt.Errorf("Shadow daemon is not running. Start it with 'shadow start'.")
+		}
+		if err := client.WaitForHTTP(10 * time.Second); err != nil {
+			return fmt.Errorf("daemon is up but HTTP is not responding: %w", err)
+		}
+		base := client.HTTPURL()
+		fmt.Printf("Add the following to your MCP host's mcpServers config:\n\n")
+		fmt.Printf("  {\n")
+		fmt.Printf("    \"shadow\": {\n")
+		fmt.Printf("      \"url\": \"%s/mcp\"\n", base)
+		fmt.Printf("    }\n")
+		fmt.Printf("  }\n\n")
+		fmt.Printf("Endpoints exposed at %s/mcp:\n", base)
+		fmt.Printf("  GET  /mcp/resources          list rules\n")
+		fmt.Printf("  GET  /mcp/resources/{id}     get a rule\n")
+		fmt.Printf("  GET  /mcp/tools              list available tools\n")
+		fmt.Printf("  POST /mcp/tools/search_rules keyword filter over rules\n")
+		fmt.Printf("  POST /mcp/tools/get_active_rules list active rules for a project\n")
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(serveCmd)
@@ -487,6 +525,7 @@ func init() {
 	rootCmd.AddCommand(reviewCmd)
 	rootCmd.AddCommand(uninstallCmd)
 	rootCmd.AddCommand(openCmd)
+	rootCmd.AddCommand(mcpCmd)
 	uninstallCmd.Flags().Bool("clean-blocks", false, "Remove managed blocks from agent context files")
 }
 
