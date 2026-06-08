@@ -108,6 +108,7 @@ func (s *Server) routes() {
 
 	// Dashboard
 	api.HandleFunc("/dashboard", s.getDashboard).Methods("GET")
+	api.HandleFunc("/dashboard/map", s.getDashboardMap).Methods("GET")
 	api.HandleFunc("/stats", s.getStats).Methods("GET")
 
 	// Capture
@@ -478,6 +479,167 @@ func (s *Server) getDashboard(w http.ResponseWriter, r *http.Request) {
 		"project_count":   projectCount,
 		"agent_stats":     agentStats,
 	})
+}
+
+// getDashboardMap powers the Memory Map canvas (web/src/pages/MemoryMapPage).
+//
+// It returns every rule translated into the React-Flow-shaped node the
+// frontend expects (MemoryNodeData) plus a list of edges derived from
+// tag overlap (>=1 shared tag = "medium" relation, >=2 = "strong").
+// The frontend's category mapping is intentionally loose — we map our
+// internal category vocabulary to the 3 frontend buckets (code /
+// architecture / practice) by simple keyword match; otherwise the rule
+// falls into 'practice' as a safe default.
+func (s *Server) getDashboardMap(w http.ResponseWriter, r *http.Request) {
+	rules, err := s.ruleRepo.List(storage.RuleFilter{Limit: 500})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	// Build nodes.
+	nodes := make([]map[string]any, 0, len(rules))
+	for _, rule := range rules {
+		nodes = append(nodes, map[string]any{
+			"id":              rule.ID,
+			"title":           firstLine(rule.Content, 40),
+			"content":         rule.Content,
+			"category":        mapCategory(rule.Category, rule.Tags),
+			"status":          mapStatus(rule.Status),
+			"confidence":      rule.Confidence,
+			"version":         rule.Version,
+			"tags":            rule.Tags,
+			"trigger_context": rule.TriggerContext,
+			"project_path":    rule.ProjectPath,
+			"agents":          ruleAgents(rule.ProjectPath), // best-effort
+			"hit_count":       0,                            // filled later if you wire a counter
+			"created_at":      rule.CreatedAt,
+			"updated_at":      rule.UpdatedAt,
+		})
+	}
+
+	// Build edges from tag overlap. O(n^2) over tag sets is fine at
+	// v1 scale (<500 rules). Each pair appears at most once.
+	edges := []map[string]any{}
+	for i := 0; i < len(rules); i++ {
+		for j := i + 1; j < len(rules); j++ {
+			shared := tagOverlap(rules[i].Tags, rules[j].Tags)
+			if shared == 0 {
+				continue
+			}
+			kind := "weak"
+			switch {
+			case shared >= 2:
+				kind = "strong"
+			case shared == 1:
+				kind = "medium"
+			}
+			edges = append(edges, map[string]any{
+				"source": rules[i].ID,
+				"target": rules[j].ID,
+				"data": map[string]any{
+					"kind":   kind,
+					"reason": "shared " + itoa(shared) + " tag(s)",
+				},
+			})
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"nodes":     nodes,
+		"edges":     edges,
+		"generated": len(nodes),
+	})
+}
+
+// --- dashboard/map helpers ---
+
+// mapCategory collapses our internal category vocabulary into the 3
+// frontend buckets. Unknown categories fall into 'practice'.
+func mapCategory(category string, tags []string) string {
+	c := category
+	for _, t := range tags {
+		if t != "" {
+			c = t
+			break
+		}
+	}
+	switch c {
+	case "toolchain", "tooling", "code-style", "style":
+		return "code"
+	case "arch", "architecture":
+		return "architecture"
+	}
+	return "practice"
+}
+
+// mapStatus collapses 4 internal statuses into the 3 frontend buckets.
+func mapStatus(status string) string {
+	switch status {
+	case "conflicted":
+		return "conflicted"
+	case "active":
+		return "active"
+	}
+	return "other"
+}
+
+// tagOverlap returns how many strings the two slices share.
+func tagOverlap(a, b []string) int {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	seen := make(map[string]struct{}, len(a))
+	for _, t := range a {
+		seen[t] = struct{}{}
+	}
+	n := 0
+	for _, t := range b {
+		if _, ok := seen[t]; ok {
+			n++
+		}
+	}
+	return n
+}
+
+// ruleAgents returns the project-path-derived "agent" label for a rule.
+// Without a per-rule "agents" array on disk (we don't store one yet),
+// the only signal we have is the scope: project-scoped rules are
+// attributed to all known agents; global-scoped rules are too. The
+// frontend treats agents as display labels, so a coarse list is fine.
+func ruleAgents(_ string) []string {
+	return []string{"Claude Code", "Cursor", "Codex"}
+}
+
+// firstLine trims a string to its first line and shortens if longer
+// than maxLen (suffix "...").
+func firstLine(s string, maxLen int) string {
+	for i, r := range s {
+		if r == '\n' {
+			s = s[:i]
+			break
+		}
+	}
+	if len(s) > maxLen {
+		return s[:maxLen] + "..."
+	}
+	return s
+}
+
+// itoa is a small int-to-string helper to avoid pulling strconv just
+// for edge reason labels.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var buf [20]byte
+	pos := len(buf)
+	for n > 0 {
+		pos--
+		buf[pos] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(buf[pos:])
 }
 
 func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {

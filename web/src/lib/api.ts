@@ -109,6 +109,7 @@ export const api = {
 
   // Dashboard
   getDashboard: () => fetchAPI<DashboardData>('/dashboard'),
+  getDashboardMap: () => fetchAPI<{ nodes: any[]; edges: any[]; generated: number }>('/dashboard/map'),
 
   // Config
   getConfig: () => fetchAPI<Config>('/config'),

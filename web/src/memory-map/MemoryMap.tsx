@@ -23,7 +23,7 @@ import { Hud } from './Hud';
 import { DetailDrawer } from './DetailDrawer';
 import { MOCK_NODES, MOCK_RELATIONS, MOCK_STATS } from './mockData';
 import { computeLayout } from './layout';
-import type { MemoryNodeData, MapFilters, RelationData } from './types';
+import type { MemoryNodeData, MapFilters, MapStats, RelationData } from './types';
 import './memory-map.css';
 
 const nodeTypes = { rule: RuleNode };
@@ -31,13 +31,23 @@ const edgeTypes = { relation: RelationEdge };
 
 interface MemoryMapProps {
   onOpenInRules?: (id: string) => void;
+  nodes?: MemoryNodeData[];
+  relations?: { source: string; target: string; data: RelationData }[];
+  stats?: MapStats;
 }
 
 // 波纹推开参数 — 微调这几个值就能微调手感
 const RIPPLE_RADIUS = 240;     // 影响半径 (px)
 const RIPPLE_FORCE = 75;       // 最大推开距离 (px)
 
-export function MemoryMap({ onOpenInRules }: MemoryMapProps) {
+export function MemoryMap({ onOpenInRules, nodes: propNodes, relations: propRelations, stats: propStats }: MemoryMapProps) {
+  // If the caller passed real data, use it; otherwise fall back to mock
+  // (mock keeps the canvas renderable during local dev when the daemon
+  // is offline / a brand-new user has fewer than the threshold of rules).
+  const hasRealData = (propNodes?.length ?? 0) > 0;
+  const dataNodes = hasRealData ? propNodes! : MOCK_NODES;
+  const dataRelations = hasRealData ? propRelations! : MOCK_RELATIONS;
+  const dataStats = propStats ?? MOCK_STATS;
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<MapFilters>({
     category: 'all',
@@ -49,7 +59,7 @@ export function MemoryMap({ onOpenInRules }: MemoryMapProps) {
 
   // 节点位置（持久化用户拖动）
   const initialLayout = useMemo(
-    () => computeLayout(MOCK_NODES, MOCK_RELATIONS.map(r => ({ source: r.source, target: r.target }))),
+    () => computeLayout(dataNodes, dataRelations.map(r => ({ source: r.source, target: r.target }))),
     []
   );
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>(initialLayout.positions);
@@ -61,7 +71,7 @@ export function MemoryMap({ onOpenInRules }: MemoryMapProps) {
   const matches = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return new Set(
-      MOCK_NODES.filter(n => {
+      dataNodes.filter(n => {
         if (filters.category !== 'all' && n.category !== filters.category) return false;
         if (filters.status !== 'all' && n.status !== filters.status) return false;
         if (q) {
@@ -100,7 +110,7 @@ export function MemoryMap({ onOpenInRules }: MemoryMapProps) {
 
   // 构建 React Flow nodes
   const nodes: Node<MemoryNodeData & { pushOffsetX?: number; pushOffsetY?: number }>[] = useMemo(() => {
-    return MOCK_NODES.map(n => {
+    return dataNodes.map(n => {
       const base = positions[n.id] ?? { x: 0, y: 0 };
       const off = pushOffsets[n.id];
       const matched = matches.has(n.id);
@@ -123,7 +133,7 @@ export function MemoryMap({ onOpenInRules }: MemoryMapProps) {
 
   // 构建 React Flow edges
   const edges: Edge<RelationData>[] = useMemo(() => {
-    return MOCK_RELATIONS.map((r, i) => {
+    return dataRelations.map((r, i) => {
       const sourceInMatch = matches.has(r.source);
       const targetInMatch = matches.has(r.target);
       const dimmed = isSearchingOrFiltering && !(sourceInMatch && targetInMatch);
@@ -199,7 +209,7 @@ export function MemoryMap({ onOpenInRules }: MemoryMapProps) {
   }, []);
 
   const selectedNode = useMemo(
-    () => MOCK_NODES.find(n => n.id === selectedId) ?? null,
+    () => dataNodes.find(n => n.id === selectedId) ?? null,
     [selectedId]
   );
 
@@ -264,7 +274,7 @@ export function MemoryMap({ onOpenInRules }: MemoryMapProps) {
       </ReactFlow>
 
       <Hud
-        stats={MOCK_STATS}
+        stats={dataStats}
         filters={filters}
         searchQuery={searchQuery}
         searchMatchCount={matches.size}
