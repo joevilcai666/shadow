@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -87,7 +88,7 @@ func (s *Server) Start() error {
 		return fmt.Errorf("refusing to bind to non-localhost address %s (security)", s.cfg.Bind)
 	}
 
-	go s.wsHub.Run()
+	go s.wsHub.Run(context.Background())
 
 	slog.Info("starting HTTP server", "addr", addr)
 	return http.ListenAndServe(addr, s.router)
