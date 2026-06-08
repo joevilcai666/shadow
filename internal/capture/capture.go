@@ -231,7 +231,7 @@ var (
 	}
 	// Explicit mark patterns.
 	markPatterns = []*regexp.Regexp{
-		regexp.MustCompile(`(?i)(记住|记住这条|以后都要|以后都这样|remember|note this|always do|from now on|make sure)`),
+		regexp.MustCompile(`(?i)(记得|记住|记住这条|以后都要|以后都这样|remember|note this|always do|from now on|make sure)`),
 	}
 )
 
