@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
@@ -33,6 +34,20 @@ type Server struct {
 	wsHub       *WebSocketHub
 	cfg         config.ServerConfig
 	mcpServer   *adapter.MCPServer
+
+	// Optional callback hooks. The daemon wires these in after New() so
+	// the HTTP layer doesn't need to know about the capture engine or
+	// the adapter loop. Nil-safe — if not wired the endpoints return
+	// 503 with a clear "daemon-only" message.
+	onToggleCapture func() error
+	onSyncAdapters  func() error
+}
+
+// SetControlHooks wires daemon-side callbacks into the HTTP server. Must
+// be called after New() before the server is started.
+func (s *Server) SetControlHooks(toggleCapture, syncAdapters func() error) {
+	s.onToggleCapture = toggleCapture
+	s.onSyncAdapters = syncAdapters
 }
 
 // New creates a new HTTP server.
@@ -187,8 +202,15 @@ func (s *Server) listRules(w http.ResponseWriter, r *http.Request) {
 		filter.Offset, _ = strconv.Atoi(offsetStr)
 	}
 	if tagsStr := r.URL.Query().Get("tags"); tagsStr != "" {
-		// Simple comma-separated.
-		// Production would use proper parsing.
+		// Comma-separated tag filter — matches rules containing ALL listed tags.
+		var tags []string
+		for _, t := range strings.Split(tagsStr, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				tags = append(tags, t)
+			}
+		}
+		filter.Tags = tags
 	}
 
 	rules, err := s.ruleRepo.List(filter)
@@ -446,7 +468,60 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 			if b, ok := val.(bool); ok {
 				cfg.Distill.BatchMode = b
 			}
+		case "llm_api_key":
+			if str, ok := val.(string); ok {
+				cfg.Distill.LLMAPIKey = str
+			}
+		case "llm_model":
+			if str, ok := val.(string); ok {
+				cfg.Distill.LLMModel = str
+			}
+		case "deny_patterns":
+			if arr, ok := val.([]any); ok {
+				patterns := make([]string, 0, len(arr))
+				for _, v := range arr {
+					if s, ok := v.(string); ok {
+						patterns = append(patterns, s)
+					}
+				}
+				cfg.Privacy.DenyPatterns = patterns
+			}
+		case "exclude_patterns":
+			if arr, ok := val.([]any); ok {
+				patterns := make([]string, 0, len(arr))
+				for _, v := range arr {
+					if s, ok := v.(string); ok {
+						patterns = append(patterns, s)
+					}
+				}
+				cfg.Privacy.ExcludePatterns = patterns
+			}
+		case "claude_code_enabled":
+			if b, ok := val.(bool); ok {
+				cfg.Adapters.ClaudeCode.Enabled = b
+			}
+		case "cursor_enabled":
+			if b, ok := val.(bool); ok {
+				cfg.Adapters.Cursor.Enabled = b
+			}
+		case "codex_enabled":
+			if b, ok := val.(bool); ok {
+				cfg.Adapters.Codex.Enabled = b
+			}
+		case "copilot_enabled":
+			if b, ok := val.(bool); ok {
+				cfg.Adapters.Copilot.Enabled = b
+			}
+		case "server_port":
+			if n, ok := val.(float64); ok {
+				cfg.Server.Port = int(n)
+			}
 		}
+	}
+	// Persist so the change survives a daemon restart.
+	if err := s.configMgr.SaveGlobal(); err != nil {
+		writeError(w, http.StatusInternalServerError, "save config: "+err.Error())
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
@@ -650,6 +725,16 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) toggleCapture(w http.ResponseWriter, r *http.Request) {
+	if s.onToggleCapture == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "capture toggle not wired (daemon not running in-process)",
+		})
+		return
+	}
+	if err := s.onToggleCapture(); err != nil {
+		writeError(w, http.StatusInternalServerError, "toggle: "+err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "toggled"})
 }
 
@@ -798,7 +883,16 @@ func (s *Server) toggleAdapter(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) syncAdapters(w http.ResponseWriter, r *http.Request) {
-	// Trigger adapter sync. In a real implementation, this would signal the daemon.
+	if s.onSyncAdapters == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "adapter sync not wired (daemon not running in-process)",
+		})
+		return
+	}
+	if err := s.onSyncAdapters(); err != nil {
+		writeError(w, http.StatusInternalServerError, "sync: "+err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "sync triggered"})
 }
 

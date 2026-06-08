@@ -132,6 +132,27 @@ func (m *Manager) LoadGlobal() error {
 	return m.compileDenyPatterns(m.global)
 }
 
+// SaveGlobal writes the current global config back to ~/.shadow/config.yaml.
+// Used by the /api/config PUT handler so settings changed via the web UI
+// survive a daemon restart.
+func (m *Manager) SaveGlobal() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	path := filepath.Join(m.homeDir, "config.yaml")
+	data, err := yaml.Marshal(m.global)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	if err := os.MkdirAll(m.homeDir, 0755); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	return m.compileDenyPatterns(m.global)
+}
+
 // LoadProject loads and merges a project-level config.
 func (m *Manager) LoadProject(projectDir string) (*Config, error) {
 	m.mu.RLock()
