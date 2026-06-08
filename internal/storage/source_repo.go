@@ -15,13 +15,19 @@ func NewSourceRepo(db *sql.DB) *SourceRepo {
 	return &SourceRepo{db: db}
 }
 
-// Create inserts a new source record.
+// Create inserts a new source record. An empty RuleID is stored as NULL so
+// the capture path can persist signals before the distill engine links them
+// to a crystallized rule (see migration 002).
 func (r *SourceRepo) Create(source *Source) error {
+	var ruleID sql.NullString
+	if source.RuleID != "" {
+		ruleID = sql.NullString{String: source.RuleID, Valid: true}
+	}
 	_, err := r.db.Exec(`
 		INSERT INTO sources (id, rule_id, signal_type, signal_strength, agent_name,
 		                     project_path, raw_snippet, timestamp, confidence_contribution)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		source.ID, source.RuleID, source.SignalType, source.SignalStrength,
+		source.ID, ruleID, source.SignalType, source.SignalStrength,
 		source.AgentName, source.ProjectPath, source.RawSnippet,
 		source.Timestamp, source.ConfidenceContribution,
 	)
@@ -79,12 +85,19 @@ func (r *SourceRepo) StatsBySignalType(ruleID string) (map[string]int, error) {
 
 func scanSource(rows *sql.Rows) (*Source, error) {
 	var s Source
+	var ruleID sql.NullString
 	err := rows.Scan(
-		&s.ID, &s.RuleID, &s.SignalType, &s.SignalStrength,
+		&s.ID, &ruleID, &s.SignalType, &s.SignalStrength,
 		&s.AgentName, &s.ProjectPath, &s.RawSnippet,
 		&s.Timestamp, &s.ConfidenceContribution,
 	)
-	return &s, err
+	if err != nil {
+		return &s, err
+	}
+	if ruleID.Valid {
+		s.RuleID = ruleID.String
+	}
+	return &s, nil
 }
 
 // ListUnlinked returns sources that haven't been linked to any rule yet.

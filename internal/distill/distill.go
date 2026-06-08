@@ -150,9 +150,10 @@ func (e *Engine) createRule(candidate *CandidateRule, sources []*storage.Source,
 
 	// Link sources to the rule.
 	for _, s := range sources {
-		s.RuleID = rule.ID
-		// Note: source already has an ID from capture. We'd need an Update method
-		// to link it. For now, log.
+		if err := e.sourceDB.LinkToRule(s.ID, rule.ID); err != nil {
+			slog.Warn("link source to rule failed", "source_id", s.ID, "rule_id", rule.ID, "error", err)
+			continue
+		}
 		slog.Debug("linked source to rule", "source_id", s.ID, "rule_id", rule.ID)
 	}
 
