@@ -27,6 +27,11 @@ func newLocalRequest(method, target string, body io.Reader) *http.Request {
 
 // testEnv sets up a full test environment with DB, repos, and config.
 func testEnv(t *testing.T) (*Server, *sql.DB) {
+	s, db, _ := testEnvWithDir(t)
+	return s, db
+}
+
+func testEnvWithDir(t *testing.T) (*Server, *sql.DB, string) {
 	t.Helper()
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
@@ -49,7 +54,7 @@ func testEnv(t *testing.T) (*Server, *sql.DB) {
 		config.ServerConfig{Port: 7878, Bind: "127.0.0.1"},
 		adapter.NewMCPServer(storage.NewRuleRepo(db)),
 	)
-	return s, db
+	return s, db, dir
 }
 
 func TestListRulesEmpty(t *testing.T) {
@@ -146,6 +151,58 @@ func TestDeleteRule(t *testing.T) {
 	}
 }
 
+func TestPartialRuleUpdatePreservesFieldsAndTriggersSync(t *testing.T) {
+	s, db := testEnv(t)
+	syncs := 0
+	s.SetControlHooks(nil, func() error {
+		syncs++
+		return nil
+	})
+
+	original := &storage.Rule{
+		ID:          storage.NewID(),
+		Content:     "Use pnpm not npm",
+		Scope:       "project",
+		ProjectPath: "/tmp/shadow-project",
+		Tags:        []string{"toolchain"},
+		Category:    "toolchain",
+		Confidence:  0.9,
+		Status:      "candidate",
+		Version:     1,
+		CreatedAt:   storage.Now(),
+		UpdatedAt:   storage.Now(),
+	}
+	if err := storage.NewRuleRepo(db).Create(original); err != nil {
+		t.Fatalf("seed rule: %v", err)
+	}
+
+	req := newLocalRequest("PUT", "/api/rules/"+original.ID, bytes.NewReader([]byte(`{"status":"active"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("update status: got %d, want %d. body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	got, err := storage.NewRuleRepo(db).GetByID(original.ID)
+	if err != nil {
+		t.Fatalf("load updated rule: %v", err)
+	}
+	if got.Content != original.Content {
+		t.Errorf("content = %q, want preserved %q", got.Content, original.Content)
+	}
+	if got.ProjectPath != original.ProjectPath {
+		t.Errorf("project path = %q, want %q", got.ProjectPath, original.ProjectPath)
+	}
+	if got.Status != "active" {
+		t.Errorf("status = %q, want active", got.Status)
+	}
+	if syncs != 1 {
+		t.Errorf("adapter sync calls = %d, want 1", syncs)
+	}
+}
+
 func TestSensitiveDataRejection(t *testing.T) {
 	s, _ := testEnv(t)
 
@@ -232,6 +289,71 @@ func TestCreateProject(t *testing.T) {
 
 	if w.Code != http.StatusCreated {
 		t.Errorf("create project status: %d, body: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestUpdateConfigPersistsActualConfig(t *testing.T) {
+	s, _, dir := testEnvWithDir(t)
+
+	req := newLocalRequest("PUT", "/api/config", bytes.NewReader([]byte(`{"capture_enabled":false,"cursor_enabled":false,"distill_threshold":"high"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("config update status: got %d, want %d. body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if s.configMgr.Get().Capture.Enabled {
+		t.Error("capture enabled should be false in live config")
+	}
+	if s.configMgr.Get().Adapters.Cursor.Enabled {
+		t.Error("cursor adapter should be false in live config")
+	}
+
+	reloaded := config.NewManager(dir)
+	if err := reloaded.LoadGlobal(); err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if reloaded.Get().Capture.Enabled {
+		t.Error("capture enabled should persist as false")
+	}
+	if reloaded.Get().Adapters.Cursor.Enabled {
+		t.Error("cursor adapter should persist as false")
+	}
+	if reloaded.Get().Distill.Threshold != "high" {
+		t.Errorf("threshold = %q, want high", reloaded.Get().Distill.Threshold)
+	}
+}
+
+func TestToggleAdapterPersistsAndTriggersSync(t *testing.T) {
+	s, _, dir := testEnvWithDir(t)
+	syncs := 0
+	s.SetControlHooks(nil, func() error {
+		syncs++
+		return nil
+	})
+
+	req := newLocalRequest("POST", "/api/adapters/cursor/toggle", bytes.NewReader([]byte(`{"enabled":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("adapter toggle status: got %d, want %d. body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if s.configMgr.Get().Adapters.Cursor.Enabled {
+		t.Error("cursor adapter should be disabled in live config")
+	}
+	if syncs != 1 {
+		t.Errorf("adapter sync calls = %d, want 1", syncs)
+	}
+
+	reloaded := config.NewManager(dir)
+	if err := reloaded.LoadGlobal(); err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if reloaded.Get().Adapters.Cursor.Enabled {
+		t.Error("cursor adapter should persist as disabled")
 	}
 }
 
@@ -352,9 +474,9 @@ func TestDashboardMapEdgesFromTagOverlap(t *testing.T) {
 	// Two rules sharing the "pnpm" tag should produce a medium edge.
 	for i, content := range []string{"Use pnpm not npm", "Always commit lockfile"} {
 		body, _ := json.Marshal(map[string]any{
-			"content": content,
-			"scope":   "global",
-			"tags":    []string{"pnpm"},
+			"content":    content,
+			"scope":      "global",
+			"tags":       []string{"pnpm"},
 			"category":   "toolchain",
 			"confidence": 0.9,
 			"status":     "active",
@@ -371,9 +493,9 @@ func TestDashboardMapEdgesFromTagOverlap(t *testing.T) {
 
 	// A third rule with no shared tags — should NOT be linked.
 	body, _ := json.Marshal(map[string]any{
-		"content": "Use camelCase not snake_case",
-		"scope":   "global",
-		"tags":    []string{"naming"},
+		"content":    "Use camelCase not snake_case",
+		"scope":      "global",
+		"tags":       []string{"naming"},
 		"category":   "style",
 		"confidence": 0.7,
 		"status":     "active",
@@ -446,7 +568,7 @@ func TestWebSocketBroadcastDropsSlowClient(t *testing.T) {
 	client := &WSClient{send: make(chan []byte, 1)}
 	hub.Register(client)
 
-	hub.Broadcast(map[string]any{"event": "first"}) // fills the buffer
+	hub.Broadcast(map[string]any{"event": "first"})  // fills the buffer
 	hub.Broadcast(map[string]any{"event": "second"}) // should be dropped
 
 	// Unregister runs in a goroutine; give it a beat.

@@ -22,8 +22,8 @@ type Config struct {
 
 // CaptureConfig controls the capture engine.
 type CaptureConfig struct {
-	Enabled  bool                       `yaml:"enabled"`
-	Projects map[string]ProjectCapture  `yaml:"projects"`
+	Enabled  bool                      `yaml:"enabled"`
+	Projects map[string]ProjectCapture `yaml:"projects"`
 }
 
 // ProjectCapture is per-project capture override.
@@ -39,11 +39,11 @@ type PrivacyConfig struct {
 
 // DistillConfig controls the rule distillation engine.
 type DistillConfig struct {
-	Threshold            string `yaml:"threshold"`
-	AutoActivateLowRisk  bool   `yaml:"auto_activate_low_risk"`
-	BatchMode            bool   `yaml:"batch_mode"`
-	LLMAPIKey            string `yaml:"llm_api_key"`
-	LLMModel             string `yaml:"llm_model"`
+	Threshold           string `yaml:"threshold"`
+	AutoActivateLowRisk bool   `yaml:"auto_activate_low_risk"`
+	BatchMode           bool   `yaml:"batch_mode"`
+	LLMAPIKey           string `yaml:"llm_api_key"`
+	LLMModel            string `yaml:"llm_model"`
 }
 
 // AdaptersConfig configures which agent adapters are active.
@@ -68,10 +68,10 @@ type ServerConfig struct {
 
 // Manager manages configuration loading, merging, and validation.
 type Manager struct {
-	mu       sync.RWMutex
-	global   *Config
-	homeDir  string
-	denyRe   []*regexp.Regexp
+	mu      sync.RWMutex
+	global  *Config
+	homeDir string
+	denyRe  []*regexp.Regexp
 }
 
 // NewManager creates a new config manager.
@@ -105,10 +105,10 @@ func DefaultConfig() *Config {
 			},
 		},
 		Distill: DistillConfig{
-			Threshold:          "medium",
-			AutoActivateLowRisk: true,
-			BatchMode:          false,
-			LLMModel:           "claude-sonnet-4-20250514",
+			Threshold:           "medium",
+			AutoActivateLowRisk: false,
+			BatchMode:           false,
+			LLMModel:            "claude-sonnet-4-20250514",
 		},
 		Adapters: AdaptersConfig{
 			ClaudeCode: AdapterConfig{Enabled: true, GlobalPath: "~/.claude/CLAUDE.md"},
@@ -139,6 +139,43 @@ func (m *Manager) SaveGlobal() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if err := validate(m.global); err != nil {
+		return fmt.Errorf("validation error: %w", err)
+	}
+	if err := m.compileDenyPatterns(m.global); err != nil {
+		return fmt.Errorf("compile deny patterns: %w", err)
+	}
+	return m.saveGlobalLocked()
+}
+
+// UpdateGlobal mutates the live global config and persists it atomically.
+func (m *Manager) UpdateGlobal(update func(*Config)) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	previous := cloneConfig(m.global)
+	update(m.global)
+	ensureConfigMaps(m.global)
+
+	if err := validate(m.global); err != nil {
+		m.global = previous
+		_ = m.compileDenyPatterns(m.global)
+		return fmt.Errorf("validation error: %w", err)
+	}
+	if err := m.compileDenyPatterns(m.global); err != nil {
+		m.global = previous
+		_ = m.compileDenyPatterns(m.global)
+		return fmt.Errorf("compile deny patterns: %w", err)
+	}
+	if err := m.saveGlobalLocked(); err != nil {
+		m.global = previous
+		_ = m.compileDenyPatterns(m.global)
+		return err
+	}
+	return nil
+}
+
+func (m *Manager) saveGlobalLocked() error {
 	path := filepath.Join(m.homeDir, "config.yaml")
 	data, err := yaml.Marshal(m.global)
 	if err != nil {
@@ -150,7 +187,7 @@ func (m *Manager) SaveGlobal() error {
 	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("write config: %w", err)
 	}
-	return m.compileDenyPatterns(m.global)
+	return nil
 }
 
 // LoadProject loads and merges a project-level config.
@@ -174,8 +211,7 @@ func (m *Manager) LoadProject(projectDir string) (*Config, error) {
 func (m *Manager) Get() *Config {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	cp := *m.global
-	return &cp
+	return cloneConfig(m.global)
 }
 
 // Reload reloads the global config from disk (hot update).
@@ -199,6 +235,13 @@ func (m *Manager) Reload() error {
 
 	m.global = fresh
 	return nil
+}
+
+// IsAdapterEnabled checks whether an adapter is enabled in the live config.
+func (m *Manager) IsAdapterEnabled(name string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return AdapterEnabled(m.global, name)
 }
 
 // IsCaptureEnabled checks if capture is enabled for a given project path.
@@ -298,4 +341,43 @@ func validate(cfg *Config) error {
 		return fmt.Errorf("invalid server port: %d", cfg.Server.Port)
 	}
 	return nil
+}
+
+// AdapterEnabled checks whether an adapter is enabled in a config snapshot.
+func AdapterEnabled(cfg *Config, name string) bool {
+	if cfg == nil {
+		return false
+	}
+	switch name {
+	case "claude_code":
+		return cfg.Adapters.ClaudeCode.Enabled
+	case "cursor":
+		return cfg.Adapters.Cursor.Enabled
+	case "codex":
+		return cfg.Adapters.Codex.Enabled
+	case "copilot":
+		return cfg.Adapters.Copilot.Enabled
+	default:
+		return false
+	}
+}
+
+func cloneConfig(cfg *Config) *Config {
+	if cfg == nil {
+		return DefaultConfig()
+	}
+	cp := *cfg
+	cp.Capture.Projects = make(map[string]ProjectCapture, len(cfg.Capture.Projects))
+	for k, v := range cfg.Capture.Projects {
+		cp.Capture.Projects[k] = v
+	}
+	cp.Privacy.ExcludePatterns = append([]string(nil), cfg.Privacy.ExcludePatterns...)
+	cp.Privacy.DenyPatterns = append([]string(nil), cfg.Privacy.DenyPatterns...)
+	return &cp
+}
+
+func ensureConfigMaps(cfg *Config) {
+	if cfg.Capture.Projects == nil {
+		cfg.Capture.Projects = make(map[string]ProjectCapture)
+	}
 }

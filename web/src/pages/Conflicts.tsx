@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api, type Rule } from '../lib/api';
 import { SkipForward } from 'lucide-react';
+import { Radio, RadioGroup } from '@heroui/react';
+import { LoadingState, ShadowButton, ShadowCard } from '../components/ui';
 
 interface ConflictPair {
   ruleA: Rule;
@@ -60,18 +62,18 @@ export default function Conflicts() {
     setProcessing(false);
   };
 
-  if (loading) return <div className="p-8 text-center text-gray-500">Loading conflicts...</div>;
+  if (loading) return <div className="p-8"><LoadingState label="Loading conflicts..." /></div>;
 
   if (conflicts.length === 0 || currentIdx >= conflicts.length) {
     return (
       <div className="p-8">
         <h1 className="text-2xl font-bold mb-6">Conflict Resolution</h1>
-        <div className="text-center py-16">
+        <ShadowCard className="py-16 text-center">
           <div className="text-4xl mb-4">✓</div>
           <p className="text-gray-400">
             {conflicts.length === 0 ? 'No conflicts found. All rules are consistent.' : 'All conflicts resolved!'}
           </p>
-        </div>
+        </ShadowCard>
       </div>
     );
   }
@@ -89,7 +91,7 @@ export default function Conflicts() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
         {/* Rule A */}
-        <div className={`bg-gray-900 border rounded-xl p-6 ${resolution === 'keep_a' ? 'border-green-500/50' : 'border-gray-800'}`}>
+        <ShadowCard className={`p-6 ${resolution === 'keep_a' ? 'border-green-500/50' : ''}`}>
           <h3 className="text-sm font-semibold text-gray-500 mb-3">Rule A</h3>
           <p className="text-sm leading-relaxed mb-4">{pair.ruleA.content}</p>
           <div className="space-y-2 text-xs text-gray-500">
@@ -98,10 +100,10 @@ export default function Conflicts() {
             <div className="flex justify-between"><span>Category</span><span className="text-gray-300">{pair.ruleA.category || 'general'}</span></div>
             <div className="flex justify-between"><span>Version</span><span className="text-gray-300">v{pair.ruleA.version}</span></div>
           </div>
-        </div>
+        </ShadowCard>
 
         {/* Rule B */}
-        <div className={`bg-gray-900 border rounded-xl p-6 ${resolution === 'keep_b' ? 'border-green-500/50' : 'border-gray-800'}`}>
+        <ShadowCard className={`p-6 ${resolution === 'keep_b' ? 'border-green-500/50' : ''}`}>
           <h3 className="text-sm font-semibold text-gray-500 mb-3">Rule B</h3>
           <p className="text-sm leading-relaxed mb-4">{pair.ruleB.content}</p>
           <div className="space-y-2 text-xs text-gray-500">
@@ -110,49 +112,47 @@ export default function Conflicts() {
             <div className="flex justify-between"><span>Category</span><span className="text-gray-300">{pair.ruleB.category || 'general'}</span></div>
             <div className="flex justify-between"><span>Version</span><span className="text-gray-300">v{pair.ruleB.version}</span></div>
           </div>
-        </div>
+        </ShadowCard>
       </div>
 
       {/* System suggestion */}
       {pair.ruleB.confidence > pair.ruleA.confidence && (
-        <div className="bg-purple-500/10 border border-purple-500/30 rounded-lg p-4 mb-6">
+        <ShadowCard className="mb-6 border-purple-500/30 bg-purple-500/10 p-4">
           <p className="text-sm text-purple-300">
             💡 Suggestion: Keep Rule B — it has higher confidence ({(pair.ruleB.confidence * 100).toFixed(0)}% vs {(pair.ruleA.confidence * 100).toFixed(0)}%)
             {pair.ruleB.version > pair.ruleA.version && ' and is more recent'}
           </p>
-        </div>
+        </ShadowCard>
       )}
 
       {/* Resolution options */}
-      <div className="space-y-2 mb-6">
+      <RadioGroup value={resolution} onChange={setResolution} className="mb-6 space-y-2">
         {[
           { value: 'keep_a', label: 'Keep A, disable B', desc: `Keep "${pair.ruleA.content.slice(0, 40)}..."` },
           { value: 'keep_b', label: 'Keep B, disable A', desc: `Keep "${pair.ruleB.content.slice(0, 40)}..."` },
           { value: 'keep_both', label: 'Keep both (different scopes)', desc: 'Both active, may cause issues' },
           { value: 'disable_both', label: 'Disable both', desc: 'Neither rule will apply' },
         ].map(opt => (
-          <label key={opt.value} className={`flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
+          <ShadowCard key={opt.value} className={`cursor-pointer p-3 transition-colors ${
             resolution === opt.value ? 'bg-gray-800 border border-gray-700' : 'hover:bg-gray-900'
           }`}>
-            <input type="radio" name="resolution" value={opt.value} checked={resolution === opt.value}
-              onChange={() => setResolution(opt.value)} className="mt-1 accent-purple-500" />
-            <div>
+            <Radio value={opt.value} className="items-start">
               <span className="text-sm">{opt.label}</span>
               <p className="text-xs text-gray-500">{opt.desc}</p>
-            </div>
-          </label>
+            </Radio>
+          </ShadowCard>
         ))}
-      </div>
+      </RadioGroup>
 
       <div className="flex items-center justify-between">
-        <button onClick={() => setCurrentIdx(prev => prev + 1)}
-          className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-300">
+        <ShadowButton onClick={() => setCurrentIdx(prev => prev + 1)}
+          tone="subtle" className="gap-2">
           <SkipForward size={16} /> Skip, decide later
-        </button>
-        <button onClick={resolve} disabled={!resolution || processing}
-          className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+        </ShadowButton>
+        <ShadowButton onClick={resolve} isDisabled={!resolution || processing}
+          tone="primary" className="px-5">
           Apply & Next →
-        </button>
+        </ShadowButton>
       </div>
     </div>
   );

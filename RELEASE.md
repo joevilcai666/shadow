@@ -1,60 +1,107 @@
-# Release Guide
+# P0 Release Guide
 
-## Automated Release (via GoReleaser)
-
-```bash
-# Tag and push to trigger the release workflow
-make release v=0.2.0
-```
-
-This will:
-1. Create a git tag `v0.2.0`
-2. Push it to GitHub
-3. Trigger the Release workflow (`.github/workflows/release.yml`)
-4. GoReleaser builds for darwin (arm64/amd64) + linux
-5. Creates a GitHub Release with checksums
-6. Pushes the Homebrew formula to `joevilcai666/homebrew-shadow`
+Shadow P0 ships through GitHub Releases and Homebrew for macOS users.
 
 ## Prerequisites
 
-### 1. Create the Homebrew tap repo
-
 ```bash
+brew install goreleaser
 gh repo create joevilcai666/homebrew-shadow --public
 ```
 
-### 2. Set up GitHub Secrets
+Set `HOMEBREW_TAP_TOKEN` in `joevilcai666/shadow` repository secrets. The token needs permission to push to `joevilcai666/homebrew-shadow`.
 
-In the `joevilcai666/shadow` repo settings → Secrets:
-
-| Secret | Description |
-|--------|-------------|
-| `HOMEBREW_TAP_TOKEN` | A GitHub PAT with `repo` scope, for pushing to `homebrew-shadow` |
-
-### 3. Install GoReleaser (for local testing)
+## Local Checklist
 
 ```bash
-brew install goreleaser
+make web-setup
+make web-static
+make test
+make vet
+npm --prefix web run lint
+make build
+./shadow version
 ```
 
-## Local Release Test (dry-run)
+Run the local product smoke path from a temporary Git repo:
+
+```bash
+tmpdir="$(mktemp -d)"
+cd "$tmpdir"
+git init
+go mod init example.com/shadow-smoke
+printf "Always write table-driven tests.\\n" > CLAUDE.md
+shadow serve
+```
+
+In another terminal:
+
+```bash
+shadow open
+curl -s http://localhost:7878/api/rules?status=candidate
+curl -s -X POST http://localhost:7878/api/adapters/sync
+```
+
+Approve a candidate in the web console or with:
+
+```bash
+shadow review
+```
+
+Verify a Shadow managed block appears in enabled project context files.
+
+## Snapshot Build
 
 ```bash
 goreleaser release --snapshot --clean
+dist/shadow_darwin_arm64*/shadow version
 ```
 
-## Manual Homebrew Install (after release)
+Install the built artifact manually:
 
-Users install via:
 ```bash
+sudo cp dist/shadow_darwin_arm64*/shadow /usr/local/bin/shadow
+shadow version
+shadow serve
+shadow open
+```
+
+## Tagged Release
+
+```bash
+make release v=0.2.0
+```
+
+The GitHub workflow will:
+
+1. Check out the tag.
+2. Install Go and Node.
+3. Run GoReleaser.
+4. Build fresh web static assets through `make web-static`.
+5. Cross-build pure-Go binaries with `CGO_ENABLED=0`.
+6. Publish GitHub Release archives and checksums.
+7. Push the Homebrew formula to `joevilcai666/homebrew-shadow`.
+
+## Homebrew Verification
+
+After the release finishes:
+
+```bash
+brew update
 brew tap joevilcai666/shadow
 brew install shadow
+shadow version
+shadow start
+shadow status
+shadow open
 ```
 
-## Manual Install (without Homebrew)
+## P0 Gates
 
-```bash
-# Download from GitHub Releases
-curl -sL https://github.com/joevilcai666/shadow/releases/latest/download/shadow_0.2.0_darwin_arm64.tar.gz | tar xz
-sudo mv shadow /usr/local/bin/
-```
+- New onboarding-generated project rules include `project_path`.
+- Candidate rules remain inactive until explicit approval.
+- Rule activation, edit, delete, batch update, rollback, and adapter toggles trigger adapter sync.
+- Disabling an adapter removes Shadow managed blocks for that adapter.
+- Web console builds with HeroUI and route-level chunks.
+- `go test` and `go vet` exclude Go packages inside `web/node_modules`.
+- Snapshot release embeds freshly built web static assets.

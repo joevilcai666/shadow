@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api, type Rule } from '../lib/api';
 import { CheckCircle, XCircle, Eye } from 'lucide-react';
+import { Checkbox } from '@heroui/react';
+import { LoadingState, ShadowButton, ShadowCard, TagChip } from '../components/ui';
+import { useRealtimeRefresh } from '../lib/realtime';
 
 export default function Review() {
   const [rules, setRules] = useState<Rule[]>([]);
@@ -9,13 +12,14 @@ export default function Review() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [processing, setProcessing] = useState(false);
 
-  const loadRules = () => {
+  const loadRules = useCallback(() => {
     api.listRules({ status: 'candidate' })
       .then(r => setRules(r || []))
       .finally(() => setLoading(false));
-  };
+  }, []);
 
-  useEffect(() => { loadRules(); }, []);
+  useEffect(() => { loadRules(); }, [loadRules]);
+  useRealtimeRefresh(loadRules);
 
   const toggleSelect = (id: string) => {
     const next = new Set(selected);
@@ -65,7 +69,7 @@ export default function Review() {
   const medConfidence = rules.filter(r => r.confidence >= 0.5 && r.confidence < 0.8);
   const lowConfidence = rules.filter(r => r.confidence < 0.5);
 
-  const Group = ({ title, subtitle, items }: { title: string; subtitle: string; items: Rule[] }) => {
+  const renderGroup = (title: string, subtitle: string, items: Rule[]) => {
     if (items.length === 0) return null;
     return (
       <div className="mb-6">
@@ -73,20 +77,20 @@ export default function Review() {
         <p className="text-xs text-gray-600 mb-3">{subtitle}</p>
         <div className="space-y-2">
           {items.map(rule => (
-            <div key={rule.id} className={`bg-gray-900 border rounded-lg p-4 transition-colors ${
-              selected.has(rule.id) ? 'border-purple-500/30' : 'border-gray-800 hover:border-gray-700'
+            <ShadowCard key={rule.id} className={`p-4 transition-colors ${
+              selected.has(rule.id) ? 'border-purple-500/40' : 'hover:border-gray-700'
             }`}>
               <div className="flex items-start gap-3">
-                <input
-                  type="checkbox"
-                  checked={selected.has(rule.id)}
+                <Checkbox
+                  isSelected={selected.has(rule.id)}
                   onChange={() => toggleSelect(rule.id)}
-                  className="mt-1 accent-purple-500"
+                  aria-label={`Select rule ${rule.content}`}
+                  className="mt-1"
                 />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-xs text-gray-500">confidence: {(rule.confidence * 100).toFixed(0)}%</span>
-                    {rule.category && <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded">{rule.category}</span>}
+                    {rule.category && <TagChip>{rule.category}</TagChip>}
                     <span className="text-xs text-gray-500">{rule.scope}</span>
                   </div>
                   <p className="text-sm leading-relaxed">{rule.content}</p>
@@ -103,21 +107,21 @@ export default function Review() {
                   )}
 
                   <div className="flex items-center gap-2 mt-2">
-                    <button onClick={() => approve(rule.id)} disabled={processing}
-                      className="flex items-center gap-1 px-2.5 py-1 text-xs bg-green-500/10 text-green-400 rounded hover:bg-green-500/20 disabled:opacity-50">
+                    <ShadowButton onClick={() => approve(rule.id)} isDisabled={processing}
+                      tone="success" className="h-8 min-h-8 gap-1 text-xs">
                       <CheckCircle size={12} /> Approve
-                    </button>
-                    <button onClick={() => reject(rule.id)} disabled={processing}
-                      className="flex items-center gap-1 px-2.5 py-1 text-xs bg-red-500/10 text-red-400 rounded hover:bg-red-500/20 disabled:opacity-50">
+                    </ShadowButton>
+                    <ShadowButton onClick={() => reject(rule.id)} isDisabled={processing}
+                      tone="danger" className="h-8 min-h-8 gap-1 text-xs">
                       <XCircle size={12} /> Reject
-                    </button>
-                    <button onClick={() => toggleExpand(rule.id)} className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1">
+                    </ShadowButton>
+                    <ShadowButton onClick={() => toggleExpand(rule.id)} tone="subtle" className="h-8 min-h-8 gap-1 text-xs">
                       <Eye size={12} /> {expanded.has(rule.id) ? 'Less' : 'Details'}
-                    </button>
+                    </ShadowButton>
                   </div>
                 </div>
               </div>
-            </div>
+            </ShadowCard>
           ))}
         </div>
       </div>
@@ -132,28 +136,28 @@ export default function Review() {
           <p className="text-sm text-gray-500 mt-1">{rules.length} candidate rules awaiting review</p>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={selectAll} className="text-xs text-gray-500 hover:text-gray-300">
+          <ShadowButton onClick={selectAll} tone="subtle" className="h-8 min-h-8 text-xs">
             {selected.size === rules.length ? 'Deselect All' : 'Select All'}
-          </button>
+          </ShadowButton>
         </div>
       </div>
 
       {selected.size > 0 && (
-        <div className="flex items-center gap-3 mb-4 p-3 bg-gray-900 rounded-lg border border-gray-800">
+        <ShadowCard className="mb-4 flex items-center gap-3 p-3">
           <span className="text-sm text-gray-400">{selected.size} selected</span>
-          <button onClick={() => batchAction('approve')} disabled={processing}
-            className="px-3 py-1 text-xs bg-green-500/10 text-green-400 rounded hover:bg-green-500/20">
+          <ShadowButton onClick={() => batchAction('approve')} isDisabled={processing}
+            tone="success" className="h-8 min-h-8 text-xs">
             Batch Approve
-          </button>
-          <button onClick={() => batchAction('reject')} disabled={processing}
-            className="px-3 py-1 text-xs bg-red-500/10 text-red-400 rounded hover:bg-red-500/20">
+          </ShadowButton>
+          <ShadowButton onClick={() => batchAction('reject')} isDisabled={processing}
+            tone="danger" className="h-8 min-h-8 text-xs">
             Batch Reject
-          </button>
-        </div>
+          </ShadowButton>
+        </ShadowCard>
       )}
 
       {loading ? (
-        <div className="text-center py-12 text-gray-500">Loading candidates...</div>
+        <LoadingState label="Loading candidates..." />
       ) : rules.length === 0 ? (
         <div className="text-center py-16">
           <div className="text-4xl mb-4">🎉</div>
@@ -161,9 +165,9 @@ export default function Review() {
         </div>
       ) : (
         <>
-          <Group title="High Confidence" subtitle="≥ 80% — recommended to approve" items={highConfidence} />
-          <Group title="Medium Confidence" subtitle="50–80% — review recommended" items={medConfidence} />
-          <Group title="Low Confidence" subtitle="< 50% — needs careful review" items={lowConfidence} />
+          {renderGroup('High Confidence', '≥ 80% — recommended to approve', highConfidence)}
+          {renderGroup('Medium Confidence', '50–80% — review recommended', medConfidence)}
+          {renderGroup('Low Confidence', '< 50% — needs careful review', lowConfidence)}
         </>
       )}
     </div>
