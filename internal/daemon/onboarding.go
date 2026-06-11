@@ -389,6 +389,9 @@ func scanProject(cwd, dbPath string, selectedAgents []CheckboxItem, detectedAgen
 			// Convert scan results to candidate rules.
 			rules := scanResult.ToRules()
 			for _, rule := range rules {
+				if rule.ProjectPath == "" {
+					rule.ProjectPath = cwd
+				}
 				if err := ruleRepo.Create(rule); err != nil {
 					slog.Warn("onboarding: create rule from scan", "error", err)
 				} else {
@@ -420,6 +423,8 @@ func scanProject(cwd, dbPath string, selectedAgents []CheckboxItem, detectedAgen
 			}
 			for _, rule := range rules {
 				// Tag imported rules with their source file
+				rule.Scope = "project"
+				rule.ProjectPath = cwd
 				rule.Tags = append(rule.Tags, "import:"+f)
 				if err := ruleRepo.Create(rule); err != nil {
 					slog.Warn("onboarding: create imported rule", "error", err)
@@ -438,10 +443,22 @@ func scanProject(cwd, dbPath string, selectedAgents []CheckboxItem, detectedAgen
 			ID:        storage.NewID(),
 			Path:      cwd,
 			Name:      projectName,
-			Agents:    agentNames(detectedAgents),
+			Agents:    selectedAgentNames(selectedAgents, detectedAgents),
 			CreatedAt: storage.Now(),
 		}
 		_ = projectRepo.Create(project)
+
+		// Step 4: Install git hooks for implicit correction capture when safe.
+		if _, err := os.Stat(filepath.Join(cwd, ".git", "hooks")); err == nil {
+			homeDir := filepath.Dir(dbPath)
+			hooks := capture.NewGitHooks(homeDir, filepath.Join(homeDir, "shadow.sock"))
+			if err := hooks.Install(cwd); err != nil {
+				slog.Warn("onboarding: install git hooks", "error", err)
+				facts = append(facts, "Git hooks not installed: "+err.Error())
+			} else {
+				facts = append(facts, "Installed Shadow git hooks for correction capture")
+			}
+		}
 
 		return scanCompleteMsg{
 			count:         totalRules,
@@ -471,4 +488,17 @@ func agentNames(selected []string) []string {
 		return []string{}
 	}
 	return selected
+}
+
+func selectedAgentNames(selected []CheckboxItem, fallback []string) []string {
+	if len(selected) == 0 {
+		return agentNames(fallback)
+	}
+	names := make([]string, 0, len(selected))
+	for _, item := range selected {
+		if item.Label != "" {
+			names = append(names, item.Label)
+		}
+	}
+	return names
 }

@@ -41,10 +41,20 @@
   --duration-slow: 400ms;
 }
 
+.mm-page-wrapper {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  min-height: 100vh;
+  overflow: hidden;
+  background: var(--bg-canvas);
+}
+
 .mm-page {
   position: relative;
   width: 100%;
   height: 100%;
+  min-height: 100vh;
   background: var(--bg-canvas);
   overflow: hidden;
   font-feature-settings: 'cv11', 'ss01', 'ss03';
@@ -300,10 +310,16 @@
   background: var(--border);
 }
 
+.mm-hud-spacer {
+  flex: 1;
+}
+
 .mm-hud-growth {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: 0 1 280px;
+  min-width: 200px;
   font-size: 11px;
   color: var(--text-tertiary);
 }
@@ -434,6 +450,45 @@
 .mm-chip-dot--code { background: var(--cat-code); }
 .mm-chip-dot--architecture { background: var(--cat-architecture); }
 .mm-chip-dot--practice { background: var(--cat-practice); }
+
+@media (max-width: 640px) {
+  .mm-hud {
+    top: 20px;
+    width: calc(100% - 40px);
+    padding: 12px;
+  }
+
+  .mm-hud-stats {
+    gap: 12px;
+  }
+
+  .mm-hud-spacer,
+  .mm-hud-achievements {
+    display: none;
+  }
+
+  .mm-hud-growth {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .mm-hud-search-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mm-hud-search {
+    min-width: 0;
+  }
+
+  .mm-hud-chips {
+    flex-wrap: wrap;
+  }
+
+  .mm-chip {
+    min-height: 32px;
+  }
+}
 
 /* === 侧边抽屉 === */
 .mm-drawer {

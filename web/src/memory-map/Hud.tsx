@@ -1,9 +1,10 @@
 // 浮动 HUD — 统计 + 搜索 + 筛选 + 成长进度条
 // 毛玻璃 + 顶部居中
 
-import { useState, useRef, useEffect } from 'react';
+import { Input, Dropdown } from '@heroui/react';
 import { Search, X, Filter } from 'lucide-react';
 import type { MapStats, MapFilters, Category } from './types';
+import { ShadowButton } from '../components/ui';
 
 const CATEGORIES: Array<{ key: Category | 'all'; label: string; cls: string }> = [
   { key: 'all', label: '全部', cls: '' },
@@ -36,20 +37,6 @@ export function Hud({
   onSearchChange,
   onFilterChange,
 }: Props) {
-  const [openDropdown, setOpenDropdown] = useState<'status' | null>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!openDropdown) return;
-    function handle(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setOpenDropdown(null);
-      }
-    }
-    document.addEventListener('mousedown', handle);
-    return () => document.removeEventListener('mousedown', handle);
-  }, [openDropdown]);
-
   const activeRate = stats.total > 0 ? (stats.active / stats.total * 100).toFixed(0) : '0';
 
   return (
@@ -80,10 +67,10 @@ export function Hud({
           </>
         )}
 
-        <div style={{ flex: 1 }} />
+        <div className="mm-hud-spacer" />
 
         {/* 成长进度条 */}
-        <div className="mm-hud-growth" style={{ minWidth: 200, flex: '0 1 280px' }}>
+        <div className="mm-hud-growth">
           <span style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
             Lv.{stats.growth.level} · {stats.total}/{stats.growth.nextLevelAt}
           </span>
@@ -113,7 +100,7 @@ export function Hud({
       <div className="mm-hud-search-row">
         <div className="mm-hud-search">
           <Search size={14} className="mm-hud-search-icon" />
-          <input
+          <Input
             className="mm-hud-search-input"
             placeholder="搜索记忆 · 标签 · 项目..."
             value={searchQuery}
@@ -121,20 +108,14 @@ export function Hud({
             aria-label="搜索记忆"
           />
           {searchQuery && (
-            <button
+            <ShadowButton
               onClick={() => onSearchChange('')}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--text-tertiary)',
-                cursor: 'pointer',
-                padding: 2,
-                display: 'flex',
-              }}
+              tone="subtle"
+              className="h-6 min-h-6 w-6 min-w-6 p-0 text-[var(--text-tertiary)]"
               aria-label="清除搜索"
             >
               <X size={12} />
-            </button>
+            </ShadowButton>
           )}
           {searchQuery && (
             <span className="mm-hud-search-count">
@@ -145,66 +126,38 @@ export function Hud({
 
         <div className="mm-hud-chips">
           {CATEGORIES.map(c => (
-            <button
+            <ShadowButton
               key={c.key}
               className={`mm-chip ${filters.category === c.key ? 'mm-chip--active' : ''}`}
               onClick={() => onFilterChange({ ...filters, category: c.key })}
+              tone="subtle"
             >
               {c.cls && <span className={`mm-chip-dot ${c.cls}`} />}
               {c.label}
-            </button>
+            </ShadowButton>
           ))}
         </div>
 
-        <div ref={dropdownRef} style={{ position: 'relative' }}>
-          <button
+        <Dropdown>
+          <Dropdown.Trigger>
+            <ShadowButton
             className={`mm-chip ${filters.status !== 'all' ? 'mm-chip--active' : ''}`}
-            onClick={() => setOpenDropdown(openDropdown === 'status' ? null : 'status')}
-            aria-expanded={openDropdown === 'status'}
+            tone="subtle"
           >
             <Filter size={11} />
             {STATUS_OPTIONS.find(s => s.key === filters.status)?.label}
-          </button>
-          {openDropdown === 'status' && (
-            <div
-              style={{
-                position: 'absolute',
-                top: 'calc(100% + 6px)',
-                right: 0,
-                background: 'var(--surface-strong)',
-                backdropFilter: 'blur(16px)',
-                WebkitBackdropFilter: 'blur(16px)',
-                border: '1px solid var(--border)',
-                borderRadius: 8,
-                padding: 4,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 2,
-                minWidth: 120,
-                zIndex: 50,
-                boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-                animation: 'mm-hud-in 200ms cubic-bezier(0.16, 1, 0.3, 1) both',
-              }}
-            >
+          </ShadowButton>
+          </Dropdown.Trigger>
+          <Dropdown.Popover className="z-50 min-w-32 rounded-lg border border-[var(--border)] bg-[var(--surface-strong)] p-1 shadow-2xl backdrop-blur">
+            <Dropdown.Menu onAction={(key) => onFilterChange({ ...filters, status: key as MapFilters['status'] })}>
               {STATUS_OPTIONS.map(s => (
-                <button
-                  key={s.key}
-                  className="mm-chip"
-                  style={{
-                    justifyContent: 'flex-start',
-                    width: '100%',
-                  }}
-                  onClick={() => {
-                    onFilterChange({ ...filters, status: s.key });
-                    setOpenDropdown(null);
-                  }}
-                >
+                <Dropdown.Item key={s.key} id={s.key} className="mm-chip w-full justify-start">
                   {s.label}
-                </button>
+                </Dropdown.Item>
               ))}
-            </div>
-          )}
-        </div>
+            </Dropdown.Menu>
+          </Dropdown.Popover>
+        </Dropdown>
       </div>
     </div>
   );

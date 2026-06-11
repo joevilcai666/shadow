@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api, type Config, type Adapter } from '../lib/api';
 import { Shield, Eye, Zap, RefreshCw } from 'lucide-react';
+import { Dropdown, Switch, toast } from '@heroui/react';
+import { LoadingState, SectionCard, ShadowButton, ShadowCard, TagChip } from '../components/ui';
 
 export default function Settings() {
   const [config, setConfig] = useState<Config | null>(null);
@@ -24,15 +26,35 @@ export default function Settings() {
       await api.updateConfig({ [key]: value });
       // Optimistic update
       if (config) {
-        const newConfig = { ...config };
+        const newConfig = {
+          ...config,
+          capture: { ...config.capture },
+          distill: { ...config.distill },
+        };
         if (key === 'capture_enabled') newConfig.capture.enabled = value as boolean;
-        if (key === 'auto_activate_low_risk') newConfig.distill.auto_activate_low_risk = value as boolean;
         if (key === 'batch_mode') newConfig.distill.batch_mode = value as boolean;
         if (key === 'distill_threshold') newConfig.distill.threshold = value as string;
         setConfig(newConfig);
       }
     } catch (err) {
       console.error('Failed to update config:', err);
+      toast.danger('Failed to update settings');
+    }
+    setSaving(false);
+  };
+
+  const toggleCapture = async () => {
+    if (!config) return;
+    setSaving(true);
+    try {
+      await api.toggleCapture();
+      setConfig({
+        ...config,
+        capture: { ...config.capture, enabled: !config.capture.enabled },
+      });
+    } catch (err) {
+      console.error('Failed to toggle capture:', err);
+      toast.danger('Capture toggle failed');
     }
     setSaving(false);
   };
@@ -43,22 +65,16 @@ export default function Settings() {
       setAdapters(prev => prev.map(a => a.name === name ? { ...a, enabled: !enabled } : a));
     } catch (err) {
       console.error('Failed to toggle adapter:', err);
+      toast.danger('Adapter update failed');
     }
   };
 
-  // Toggle component
-  const Toggle = ({ enabled, onChange }: { enabled: boolean; onChange: () => void }) => (
-    <button onClick={onChange} className={`w-10 h-5 rounded-full relative transition-colors ${enabled ? 'bg-purple-500' : 'bg-gray-700'}`}>
-      <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${enabled ? 'right-0.5' : 'left-0.5'}`} />
-    </button>
-  );
-
-  if (loading) return <div className="p-8 text-center text-gray-500">Loading settings...</div>;
+  if (loading) return <div className="p-8"><LoadingState label="Loading settings..." /></div>;
 
   const captureEnabled = config?.capture.enabled ?? true;
   const threshold = config?.distill.threshold ?? 'medium';
-  const autoActivate = config?.distill.auto_activate_low_risk ?? true;
   const batchMode = config?.distill.batch_mode ?? false;
+  const thresholdLabel = threshold === 'low' ? 'Low (1 signal)' : threshold === 'high' ? 'High (5 signals)' : 'Medium (2 signals)';
 
   return (
     <div className="p-8 max-w-3xl">
@@ -68,62 +84,62 @@ export default function Settings() {
       </div>
 
       <div className="space-y-6">
-        {/* Capture */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-          <div className="flex items-center gap-3 mb-2">
-            <Eye size={20} className="text-purple-400" />
-            <h2 className="text-lg font-semibold">Capture</h2>
-          </div>
-          <p className="text-sm text-gray-500 mb-4">Control how Shadow captures your corrections.</p>
+        <SectionCard
+          title="Capture"
+          description="Control how Shadow captures your corrections."
+          icon={<Eye size={20} />}
+        >
           <div className="space-y-4">
             <div className="flex items-center justify-between py-2 border-t border-gray-800">
               <div>
                 <span className="text-sm">Capture Enabled</span>
                 <p className="text-xs text-gray-500">Watch agent logs for correction signals</p>
               </div>
-              <Toggle enabled={captureEnabled} onChange={() => updateSetting('capture_enabled', !captureEnabled)} />
+              <Switch isSelected={captureEnabled} onChange={toggleCapture} />
             </div>
             <div className="flex items-center justify-between py-2 border-t border-gray-800">
               <span className="text-sm">Batch Mode</span>
-              <Toggle enabled={batchMode} onChange={() => updateSetting('batch_mode', !batchMode)} />
+              <Switch isSelected={batchMode} onChange={() => updateSetting('batch_mode', !batchMode)} />
             </div>
           </div>
-        </div>
+        </SectionCard>
 
-        {/* Distillation */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-          <div className="flex items-center gap-3 mb-2">
-            <Zap size={20} className="text-purple-400" />
-            <h2 className="text-lg font-semibold">Distillation</h2>
-          </div>
-          <p className="text-sm text-gray-500 mb-4">How corrections become rules.</p>
+        <SectionCard
+          title="Distillation"
+          description="How corrections become reviewable candidate rules."
+          icon={<Zap size={20} />}
+        >
           <div className="space-y-4">
             <div className="flex items-center justify-between py-2 border-t border-gray-800">
               <span className="text-sm">Threshold</span>
-              <select value={threshold} onChange={e => updateSetting('distill_threshold', e.target.value)}
-                className="bg-gray-800 border border-gray-700 rounded px-3 py-1 text-sm focus:outline-none focus:border-purple-500">
-                <option value="low">Low (1 signal)</option>
-                <option value="medium">Medium (2 signals)</option>
-                <option value="high">High (5 signals)</option>
-              </select>
+              <Dropdown>
+                <Dropdown.Trigger>
+                  <ShadowButton className="min-w-40 justify-between">{thresholdLabel}</ShadowButton>
+                </Dropdown.Trigger>
+                <Dropdown.Popover className="rounded-lg border border-gray-800 bg-gray-900 p-1 text-gray-100 shadow-xl">
+                  <Dropdown.Menu onAction={(key) => updateSetting('distill_threshold', String(key))}>
+                    <Dropdown.Item id="low" className="rounded px-3 py-2 text-sm hover:bg-gray-800">Low (1 signal)</Dropdown.Item>
+                    <Dropdown.Item id="medium" className="rounded px-3 py-2 text-sm hover:bg-gray-800">Medium (2 signals)</Dropdown.Item>
+                    <Dropdown.Item id="high" className="rounded px-3 py-2 text-sm hover:bg-gray-800">High (5 signals)</Dropdown.Item>
+                  </Dropdown.Menu>
+                </Dropdown.Popover>
+              </Dropdown>
             </div>
             <div className="flex items-center justify-between py-2 border-t border-gray-800">
               <div>
-                <span className="text-sm">Auto-activate Low Risk</span>
-                <p className="text-xs text-gray-500">Automatically activate high-confidence rules</p>
+                <span className="text-sm">Activation Policy</span>
+                <p className="text-xs text-gray-500">New memories stay candidates until you approve them</p>
               </div>
-              <Toggle enabled={autoActivate} onChange={() => updateSetting('auto_activate_low_risk', !autoActivate)} />
+              <TagChip>Manual approval</TagChip>
             </div>
           </div>
-        </div>
+        </SectionCard>
 
-        {/* Adapters */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-          <div className="flex items-center gap-3 mb-2">
-            <RefreshCw size={20} className="text-purple-400" />
-            <h2 className="text-lg font-semibold">Adapters</h2>
-          </div>
-          <p className="text-sm text-gray-500 mb-4">Connected coding agents.</p>
+        <SectionCard
+          title="Adapters"
+          description="Connected coding agents."
+          icon={<RefreshCw size={20} />}
+        >
           <div className="space-y-3">
             {adapters.map(adapter => (
               <div key={adapter.name} className="flex items-center justify-between py-3 border-t border-gray-800">
@@ -134,33 +150,31 @@ export default function Settings() {
                 <div className="flex items-center gap-3">
                   {adapter.installed ? (
                     <>
-                      <Toggle enabled={adapter.enabled} onChange={() => toggleAdapter(adapter.name, adapter.enabled)} />
-                      <span className={`text-xs px-2 py-1 rounded ${
-                        adapter.enabled ? 'bg-green-500/10 text-green-400' : 'bg-gray-800 text-gray-500'
-                      }`}>{adapter.enabled ? 'Active' : 'Paused'}</span>
+                      <Switch isSelected={adapter.enabled} onChange={() => toggleAdapter(adapter.name, adapter.enabled)} />
+                      <TagChip className={adapter.enabled ? 'text-green-300' : 'text-gray-500'}>
+                        {adapter.enabled ? 'Active' : 'Paused'}
+                      </TagChip>
                     </>
                   ) : (
-                    <span className="text-xs bg-gray-800 text-gray-500 px-2 py-1 rounded">Not Detected</span>
+                    <TagChip className="text-gray-500">Not Detected</TagChip>
                   )}
                 </div>
               </div>
             ))}
           </div>
-          <button
-            onClick={() => api.syncAdapters().then(() => alert('Sync triggered'))}
-            className="mt-4 px-4 py-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-sm transition-colors"
+          <ShadowButton
+            onClick={() => api.syncAdapters().then(() => toast.success('Sync triggered')).catch(() => toast.danger('Sync failed'))}
+            className="mt-4 gap-2"
           >
             Sync All Now
-          </button>
-        </div>
+          </ShadowButton>
+        </SectionCard>
 
-        {/* Privacy */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-          <div className="flex items-center gap-3 mb-2">
-            <Shield size={20} className="text-purple-400" />
-            <h2 className="text-lg font-semibold">Privacy & Trust</h2>
-          </div>
-          <p className="text-sm text-gray-500 mb-4">What Shadow never stores.</p>
+        <SectionCard
+          title="Privacy & Trust"
+          description="What Shadow never stores."
+          icon={<Shield size={20} />}
+        >
           <div className="space-y-3">
             {[
               { label: 'Block Keys/Tokens', value: 'Always on', type: 'readonly' },
@@ -173,20 +187,20 @@ export default function Settings() {
               <div key={label} className="flex items-center justify-between py-2 border-t border-gray-800">
                 <span className="text-sm">{label}</span>
                 {type === 'readonly' ? (
-                  <span className="text-xs text-green-400">{value}</span>
+                  <TagChip className="text-green-300">{value}</TagChip>
                 ) : (
                   <span className="text-xs text-gray-500">{value}</span>
                 )}
               </div>
             ))}
           </div>
-        </div>
+        </SectionCard>
 
         {/* About */}
-        <div className="p-4 bg-gray-900/50 border border-gray-800 rounded-xl text-center">
+        <ShadowCard className="p-4 text-center">
           <p className="text-sm text-gray-500">Shadow v0.1.0 — Local-first, your data stays yours.</p>
           <p className="text-xs text-gray-600 mt-1">Run <code className="bg-gray-800 px-1 py-0.5 rounded">shadow uninstall --clean-blocks</code> to remove all traces.</p>
-        </div>
+        </ShadowCard>
       </div>
     </div>
   );

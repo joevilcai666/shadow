@@ -3,6 +3,7 @@
 
 import { X, Edit2, Eye, GitBranch, Clock } from 'lucide-react';
 import type { MemoryNodeData, Category } from './types';
+import { IconButton, ShadowButton, StatusChip, TagChip } from '../components/ui';
 
 interface Props {
   node: MemoryNodeData | null;
@@ -16,12 +17,6 @@ const CATEGORY_LABELS: Record<Category, string> = {
   practice: 'PRACTICE',
 };
 
-const STATUS_LABELS = {
-  active: 'Active',
-  conflicted: 'Conflicted',
-  other: 'Other',
-};
-
 export function DetailDrawer({ node, onClose, onOpenInRules }: Props) {
   if (!node) return null;
 
@@ -30,20 +25,19 @@ export function DetailDrawer({ node, onClose, onOpenInRules }: Props) {
       <div className="mm-drawer-header">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span className={`mm-drawer-cat-badge mm-drawer-cat-badge--${node.category}`}>
+            <TagChip className={`mm-drawer-cat-badge mm-drawer-cat-badge--${node.category}`}>
               {CATEGORY_LABELS[node.category]}
-            </span>
-            <span style={{ fontSize: 10, color: 'var(--text-tertiary)' }}>
-              · {STATUS_LABELS[node.status]} · v{node.version}
-            </span>
+            </TagChip>
+            <StatusChip status={node.status === 'other' ? 'candidate' : node.status} />
+            <TagChip>v{node.version}</TagChip>
           </div>
           <h2 id="drawer-title" className="mm-drawer-title">
             {node.title}
           </h2>
         </div>
-        <button className="mm-drawer-close" onClick={onClose} aria-label="关闭">
+        <IconButton className="mm-drawer-close" onClick={onClose} label="关闭" tone="subtle">
           <X size={18} />
-        </button>
+        </IconButton>
       </div>
 
       <div className="mm-drawer-body">
@@ -92,7 +86,7 @@ export function DetailDrawer({ node, onClose, onOpenInRules }: Props) {
             <div className="mm-drawer-section-label">标签</div>
             <div className="mm-tag-list">
               {node.tags.map(t => (
-                <span key={t} className="mm-tag">#{t}</span>
+                <TagChip key={t} className="mm-tag">#{t}</TagChip>
               ))}
             </div>
           </section>
@@ -104,7 +98,7 @@ export function DetailDrawer({ node, onClose, onOpenInRules }: Props) {
             <div className="mm-drawer-section-label">来源</div>
             <div className="mm-agents">
               {node.agents.map(a => (
-                <span key={a} className="mm-agent-pill">{a}</span>
+                <TagChip key={a} className="mm-agent-pill">{a}</TagChip>
               ))}
             </div>
           </section>
@@ -130,30 +124,30 @@ export function DetailDrawer({ node, onClose, onOpenInRules }: Props) {
         <section>
           <div className="mm-drawer-section-label">操作</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <button
-              className="mm-chip"
-              style={{ justifyContent: 'flex-start', padding: '8px 12px' }}
+            <ShadowButton
+              className="mm-chip justify-start px-3 py-2"
               onClick={() => onOpenInRules(node.id)}
+              tone="subtle"
             >
               <Edit2 size={12} />
               <span>编辑规则</span>
-            </button>
-            <button
-              className="mm-chip"
-              style={{ justifyContent: 'flex-start', padding: '8px 12px' }}
+            </ShadowButton>
+            <ShadowButton
+              className="mm-chip justify-start px-3 py-2"
               onClick={() => onOpenInRules(node.id)}
+              tone="subtle"
             >
               <GitBranch size={12} />
               <span>查看版本历史</span>
-            </button>
-            <button
-              className="mm-chip"
-              style={{ justifyContent: 'flex-start', padding: '8px 12px' }}
+            </ShadowButton>
+            <ShadowButton
+              className="mm-chip justify-start px-3 py-2"
               onClick={() => onOpenInRules(node.id)}
+              tone="subtle"
             >
               <Eye size={12} />
               <span>在 Rules 页打开 →</span>
-            </button>
+            </ShadowButton>
           </div>
         </section>
       </div>

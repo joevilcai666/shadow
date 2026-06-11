@@ -1,14 +1,15 @@
-.PHONY: build dev test lint clean web-build web-dev release install version
+.PHONY: build dev test vet lint clean web-build web-static web-dev release install version
 
 # Build variables
 BINARY_NAME := shadow
-VERSION ?= $(shell grep 'Version' version.go | cut -d'"' -f2)
+VERSION ?= $(shell awk -F'"' '/^var Version/ {print $$2}' version.go)
 LDFLAGS := -ldflags "-X github.com/joevilcai666/shadow.Version=$(VERSION)"
 GO := go
 GOFLAGS :=
+GO_PACKAGES := $(shell $(GO) list ./... | grep -v '/web/node_modules/')
 
 ## build: Build the Shadow binary (with embedded web assets)
-build: web-build
+build: web-static
 	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BINARY_NAME) ./cmd/shadow/
 
 ## dev: Start daemon backend + web dev server concurrently
@@ -24,12 +25,16 @@ dev-web:
 
 ## test: Run all Go tests
 test:
-	$(GO) test -v -race ./...
+	$(GO) test -v -race $(GO_PACKAGES)
+
+## vet: Run go vet
+vet:
+	$(GO) vet $(GO_PACKAGES)
 
 ## lint: Run Go linter
 lint:
 	@which golangci-lint > /dev/null 2>&1 || (echo "Installing golangci-lint..." && go install github.com/golangci-lint/golangci-lint/cmd/golangci-lint@latest)
-	golangci-lint run ./...
+	golangci-lint run $(GO_PACKAGES)
 
 ## clean: Remove build artifacts
 clean:
@@ -48,6 +53,12 @@ web-dev:
 web-build:
 	@if [ ! -d web/node_modules ]; then cd web && npm install; fi
 	cd web && npm run build
+
+## web-static: Build web assets and copy them to the Go embed directory
+web-static: web-build
+	rm -rf internal/server/static
+	mkdir -p internal/server/static
+	cp -R web/dist/. internal/server/static/
 
 ## install: Install shadow to /usr/local/bin
 install: build
