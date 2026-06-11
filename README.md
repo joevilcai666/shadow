@@ -8,7 +8,7 @@ Shadow is a local-first macOS daemon for heavy coding-agent users. It captures c
 
 ```bash
 brew tap joevilcai666/shadow
-brew install shadow
+brew install --formula joevilcai666/shadow/shadow
 ```
 
 Or download a macOS archive from [GitHub Releases](https://github.com/joevilcai666/shadow/releases).
