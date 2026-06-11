@@ -21,6 +21,7 @@ func NewScanner(projectPath string) *Scanner {
 
 // ScanResult contains discovered project facts.
 type ScanResult struct {
+	ProjectDir     string
 	PackageManager string
 	TestFramework  string
 	Language       string
@@ -31,7 +32,7 @@ type ScanResult struct {
 
 // Scan performs a quick scan of the project directory.
 func (s *Scanner) Scan() (*ScanResult, error) {
-	result := &ScanResult{}
+	result := &ScanResult{ProjectDir: s.projectPath}
 
 	// Detect package manager.
 	s.detectPackageManager(result)
@@ -54,49 +55,49 @@ func (r *ScanResult) ToRules() []*storage.Rule {
 
 	if r.PackageManager != "" {
 		rules = append(rules, &storage.Rule{
-			ID:         storage.NewID(),
-			Content:    fmt.Sprintf("This project uses %s for package management", r.PackageManager),
-			Scope:      "project",
+			ID:          storage.NewID(),
+			Content:     fmt.Sprintf("This project uses %s for package management", r.PackageManager),
+			Scope:       "project",
 			ProjectPath: r.ProjectPath(),
-			Tags:       []string{"toolchain", "auto-generated"},
-			Category:   "toolchain",
-			Confidence: 0.9,
-			Status:     "candidate",
-			Version:    1,
-			CreatedAt:  storage.Now(),
-			UpdatedAt:  storage.Now(),
+			Tags:        []string{"toolchain", "auto-generated"},
+			Category:    "toolchain",
+			Confidence:  0.9,
+			Status:      "candidate",
+			Version:     1,
+			CreatedAt:   storage.Now(),
+			UpdatedAt:   storage.Now(),
 		})
 	}
 
 	if r.TestFramework != "" {
 		rules = append(rules, &storage.Rule{
-			ID:         storage.NewID(),
-			Content:    fmt.Sprintf("This project uses %s for testing", r.TestFramework),
-			Scope:      "project",
+			ID:          storage.NewID(),
+			Content:     fmt.Sprintf("This project uses %s for testing", r.TestFramework),
+			Scope:       "project",
 			ProjectPath: r.ProjectPath(),
-			Tags:       []string{"testing", "auto-generated"},
-			Category:   "testing",
-			Confidence: 0.85,
-			Status:     "candidate",
-			Version:    1,
-			CreatedAt:  storage.Now(),
-			UpdatedAt:  storage.Now(),
+			Tags:        []string{"testing", "auto-generated"},
+			Category:    "testing",
+			Confidence:  0.85,
+			Status:      "candidate",
+			Version:     1,
+			CreatedAt:   storage.Now(),
+			UpdatedAt:   storage.Now(),
 		})
 	}
 
 	if r.Language != "" {
 		rules = append(rules, &storage.Rule{
-			ID:         storage.NewID(),
-			Content:    fmt.Sprintf("This project is written in %s", r.Language),
-			Scope:      "project",
+			ID:          storage.NewID(),
+			Content:     fmt.Sprintf("This project is written in %s", r.Language),
+			Scope:       "project",
 			ProjectPath: r.ProjectPath(),
-			Tags:       []string{"language", "auto-generated"},
-			Category:   "general",
-			Confidence: 0.95,
-			Status:     "candidate",
-			Version:    1,
-			CreatedAt:  storage.Now(),
-			UpdatedAt:  storage.Now(),
+			Tags:        []string{"language", "auto-generated"},
+			Category:    "general",
+			Confidence:  0.95,
+			Status:      "candidate",
+			Version:     1,
+			CreatedAt:   storage.Now(),
+			UpdatedAt:   storage.Now(),
 		})
 	}
 
@@ -104,16 +105,14 @@ func (r *ScanResult) ToRules() []*storage.Rule {
 }
 
 func (r *ScanResult) ProjectPath() string {
-	// Use the first existing rules file's directory as a heuristic.
-	// Or return empty for global scope.
-	return ""
+	return r.ProjectDir
 }
 
 func (s *Scanner) detectPackageManager(r *ScanResult) {
 	checks := map[string]string{
-		"pnpm-lock.yaml":   "pnpm",
-		"yarn.lock":        "yarn",
-		"bun.lockb":        "bun",
+		"pnpm-lock.yaml":    "pnpm",
+		"yarn.lock":         "yarn",
+		"bun.lockb":         "bun",
 		"package-lock.json": "npm",
 	}
 
@@ -128,13 +127,13 @@ func (s *Scanner) detectPackageManager(r *ScanResult) {
 
 func (s *Scanner) detectTestFramework(r *ScanResult) {
 	checks := map[string]string{
-		"vitest.config.ts":  "Vitest",
-		"vitest.config.js":  "Vitest",
-		"jest.config.ts":    "Jest",
-		"jest.config.js":    "Jest",
-		"pytest.ini":        "pytest",
-		"Cargo.toml":        "cargo test",
-		"go.mod":            "go test",
+		"vitest.config.ts": "Vitest",
+		"vitest.config.js": "Vitest",
+		"jest.config.ts":   "Jest",
+		"jest.config.js":   "Jest",
+		"pytest.ini":       "pytest",
+		"Cargo.toml":       "cargo test",
+		"go.mod":           "go test",
 	}
 
 	for file, fw := range checks {

@@ -71,6 +71,18 @@ export interface DashboardData {
   agent_stats: Record<string, number>;
 }
 
+export interface DashboardMapEdge {
+  source: string;
+  target: string;
+  data: unknown;
+}
+
+export interface DashboardMapData {
+  nodes: unknown[];
+  edges: DashboardMapEdge[];
+  generated: number;
+}
+
 export interface Adapter {
   name: string;
   label: string;
@@ -83,7 +95,12 @@ export interface Config {
   capture: { enabled: boolean; projects: Record<string, { enabled: boolean }> };
   privacy: { exclude_patterns: string[]; deny_patterns: string[] };
   distill: { threshold: string; auto_activate_low_risk: boolean; batch_mode: boolean };
-  adapters: { claude_code: { enabled: boolean }; cursor: { enabled: boolean }; codex: { enabled: boolean } };
+  adapters: {
+    claude_code: { enabled: boolean };
+    cursor: { enabled: boolean };
+    codex: { enabled: boolean };
+    copilot: { enabled: boolean };
+  };
   server: { port: number; bind: string };
 }
 
@@ -109,7 +126,7 @@ export const api = {
 
   // Dashboard
   getDashboard: () => fetchAPI<DashboardData>('/dashboard'),
-  getDashboardMap: () => fetchAPI<{ nodes: any[]; edges: any[]; generated: number }>('/dashboard/map'),
+  getDashboardMap: () => fetchAPI<DashboardMapData>('/dashboard/map'),
 
   // Config
   getConfig: () => fetchAPI<Config>('/config'),

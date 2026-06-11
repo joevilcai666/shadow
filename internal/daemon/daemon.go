@@ -44,12 +44,13 @@ type Daemon struct {
 	logDir   string
 	homeDir  string
 
-	sockServer   *SocketServer
-	httpServer   *http.Server
-	db           *sql.DB
+	sockServer    *SocketServer
+	httpServer    *http.Server
+	db            *sql.DB
 	captureEngine *capture.Engine
 	distillEngine *distill.Engine
-	adapters     []adapter.Adapter
+	adapters      []adapter.Adapter
+	configMgr     *config.Manager
 
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -124,6 +125,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Load config.
 	cfgMgr := config.NewManager(d.homeDir)
 	cfgMgr.LoadGlobal()
+	d.configMgr = cfgMgr
 
 	// Start HTTP API server.
 	ruleRepo := storage.NewRuleRepo(db)
@@ -138,6 +140,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 		cfgMgr,
 		config.ServerConfig{Port: 7878, Bind: "127.0.0.1"},
 		mcpServer,
+	)
+	httpSrv.SetControlHooks(
+		func() error { return d.ToggleCapture(ctx, cfgMgr) },
+		func() error {
+			d.SyncAdapters()
+			return nil
+		},
 	)
 
 	d.httpServer = &http.Server{
@@ -478,6 +487,33 @@ func (d *Daemon) SyncAdapters() {
 	d.syncAdapters()
 }
 
+// ToggleCapture flips capture on/off and persists the setting.
+func (d *Daemon) ToggleCapture(ctx context.Context, cfgMgr *config.Manager) error {
+	var enabled bool
+	if err := cfgMgr.UpdateGlobal(func(cfg *config.Config) {
+		cfg.Capture.Enabled = !cfg.Capture.Enabled
+		enabled = cfg.Capture.Enabled
+	}); err != nil {
+		return err
+	}
+
+	if enabled {
+		if d.captureEngine != nil && d.GetState() != StateCapturing {
+			if err := d.captureEngine.Start(ctx); err != nil {
+				return err
+			}
+		}
+		d.SetState(StateCapturing)
+		return nil
+	}
+
+	if d.captureEngine != nil {
+		d.captureEngine.Stop()
+	}
+	d.SetState(StateIdle)
+	return nil
+}
+
 func (d *Daemon) syncAdapters() {
 	if d.db == nil || len(d.adapters) == 0 {
 		return
@@ -512,7 +548,16 @@ func (d *Daemon) syncAdapters() {
 
 	d.SetState(StateWriting)
 
+	cfg := (*config.Config)(nil)
+	if d.configMgr != nil {
+		cfg = d.configMgr.Get()
+	}
+
 	for _, a := range d.adapters {
+		if cfg != nil && !config.AdapterEnabled(cfg, a.Name()) {
+			d.removeAdapterBlocks(a, projects)
+			continue
+		}
 		if !a.IsInstalled() {
 			continue
 		}
@@ -550,6 +595,17 @@ func (d *Daemon) syncAdapters() {
 			d.SetState(StateCapturing)
 		}
 	})
+}
+
+func (d *Daemon) removeAdapterBlocks(a adapter.Adapter, projects []*storage.Project) {
+	if err := a.RemoveRules("global", ""); err != nil {
+		slog.Warn("adapter sync: remove global rules", "adapter", a.Name(), "error", err)
+	}
+	for _, p := range projects {
+		if err := a.RemoveRules("project", p.Path); err != nil {
+			slog.Warn("adapter sync: remove project rules", "adapter", a.Name(), "project", p.Name, "error", err)
+		}
+	}
 }
 
 // scanSourceRow scans a source from a database row.

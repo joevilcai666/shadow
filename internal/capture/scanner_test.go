@@ -77,10 +77,12 @@ func TestScannerEmptyDir(t *testing.T) {
 }
 
 func TestScanResultToRules(t *testing.T) {
+	projectDir := t.TempDir()
 	r := &ScanResult{
 		PackageManager: "pnpm",
 		TestFramework:  "Vitest",
 		Language:       "TypeScript/JavaScript",
+		ProjectDir:     projectDir,
 	}
 	rules := r.ToRules()
 	if len(rules) != 3 {
@@ -92,6 +94,29 @@ func TestScanResultToRules(t *testing.T) {
 		}
 		if rule.Confidence <= 0 {
 			t.Error("confidence should be > 0")
+		}
+		if rule.ProjectPath != projectDir {
+			t.Errorf("project path: got %q, want %q", rule.ProjectPath, projectDir)
+		}
+	}
+}
+
+func TestScannerRulesCarryProjectPath(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test"), 0644)
+
+	result, err := NewScanner(dir).Scan()
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+
+	rules := result.ToRules()
+	if len(rules) == 0 {
+		t.Fatal("expected scanner to generate project rules")
+	}
+	for _, rule := range rules {
+		if rule.ProjectPath != dir {
+			t.Errorf("rule %q project path = %q, want %q", rule.Content, rule.ProjectPath, dir)
 		}
 	}
 }

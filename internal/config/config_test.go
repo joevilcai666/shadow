@@ -122,6 +122,38 @@ server:
 	}
 }
 
+func TestUpdateGlobalPersistsAndReloads(t *testing.T) {
+	dir := t.TempDir()
+	m := NewManager(dir)
+	if err := m.LoadGlobal(); err != nil {
+		t.Fatalf("load global: %v", err)
+	}
+
+	if err := m.UpdateGlobal(func(cfg *Config) {
+		cfg.Capture.Enabled = false
+		cfg.Adapters.Cursor.Enabled = false
+		cfg.Privacy.DenyPatterns = append(cfg.Privacy.DenyPatterns, `shadow-secret-\d+`)
+	}); err != nil {
+		t.Fatalf("update global: %v", err)
+	}
+
+	reloaded := NewManager(dir)
+	if err := reloaded.LoadGlobal(); err != nil {
+		t.Fatalf("reload persisted config: %v", err)
+	}
+
+	cfg := reloaded.Get()
+	if cfg.Capture.Enabled {
+		t.Error("capture enabled should persist as false")
+	}
+	if cfg.Adapters.Cursor.Enabled {
+		t.Error("cursor adapter enabled should persist as false")
+	}
+	if found, _ := reloaded.ContainsSensitiveData("token shadow-secret-123"); !found {
+		t.Error("updated deny pattern should be compiled after reload")
+	}
+}
+
 func TestSensitiveDataDetection(t *testing.T) {
 	m := NewManager(t.TempDir())
 	m.LoadGlobal()

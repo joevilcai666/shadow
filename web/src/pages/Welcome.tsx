@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, type Rule } from '../lib/api';
 import { CheckCircle, XCircle, ArrowRight, SkipForward } from 'lucide-react';
+import { Card, Checkbox } from '@heroui/react';
+import { LoadingState, ShadowButton, ShadowCard, TagChip } from '../components/ui';
 
 type Step = 'review' | 'demo' | 'done';
 
@@ -95,10 +97,7 @@ export default function Welcome() {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-950 text-gray-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin text-4xl mb-4">⠋</div>
-          <p className="text-gray-500">Loading your initial memories...</p>
-        </div>
+        <LoadingState label="Loading your initial memories..." />
       </div>
     );
   }
@@ -120,9 +119,9 @@ export default function Welcome() {
                 <div key={i} className={`w-8 h-1 rounded-full ${i <= progress ? 'bg-purple-500' : 'bg-gray-800'}`} />
               ))}
             </div>
-            <button onClick={finishOnboarding} className="text-xs text-gray-500 hover:text-gray-300">
+            <ShadowButton onClick={finishOnboarding} tone="subtle" className="h-8 min-h-8 px-2 text-xs">
               Skip to Console →
-            </button>
+            </ShadowButton>
           </div>
         </div>
 
@@ -149,31 +148,33 @@ export default function Welcome() {
                       </h3>
                       <div className="space-y-2">
                         {scopedRules.map(rule => (
-                          <div
+                          <ShadowCard
                             key={rule.id}
-                            className={`bg-gray-900 border rounded-lg p-4 cursor-pointer transition-colors ${
-                              selected.has(rule.id) ? 'border-purple-500/50 bg-purple-500/5' : 'border-gray-800 hover:border-gray-700'
+                            className={`cursor-pointer p-4 transition-colors ${
+                              selected.has(rule.id) ? 'border-purple-500/50 bg-purple-500/5' : 'hover:border-gray-700'
                             }`}
                             onClick={() => toggleRule(rule.id)}
                           >
                             <div className="flex items-start gap-3">
-                              {selected.has(rule.id) ? (
-                                <CheckCircle size={18} className="text-purple-400 mt-0.5 shrink-0" />
-                              ) : (
-                                <XCircle size={18} className="text-gray-600 mt-0.5 shrink-0" />
-                              )}
+                              <Checkbox
+                                isSelected={selected.has(rule.id)}
+                                onChange={() => toggleRule(rule.id)}
+                                onClick={(event) => event.stopPropagation()}
+                                aria-label={`Select rule ${rule.content}`}
+                                className="mt-0.5"
+                              />
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm leading-relaxed">{rule.content}</p>
                                 <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
                                   <span className="capitalize">{rule.category || 'general'}</span>
                                   <span>confidence: {(rule.confidence * 100).toFixed(0)}%</span>
                                   {rule.tags?.filter(t => !t.startsWith('import:') && t !== 'auto-generated').map(tag => (
-                                    <span key={tag} className="bg-gray-800 px-1.5 py-0.5 rounded">{tag}</span>
+                                    <TagChip key={tag}>{tag}</TagChip>
                                   ))}
                                 </div>
                               </div>
                             </div>
-                          </div>
+                          </ShadowCard>
                         ))}
                       </div>
                     </div>
@@ -181,15 +182,16 @@ export default function Welcome() {
                 })}
 
                 <div className="flex items-center justify-between pt-4">
-                  <button onClick={skipAll} className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-300">
+                  <ShadowButton onClick={skipAll} tone="subtle" className="gap-2">
                     <SkipForward size={16} /> Skip review
-                  </button>
-                  <button
+                  </ShadowButton>
+                  <ShadowButton
                     onClick={activateSelected}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 rounded-lg text-sm font-medium transition-colors"
+                    tone="primary"
+                    className="gap-2 px-5"
                   >
                     Activate Selected ({selected.size}) <ArrowRight size={16} />
-                  </button>
+                  </ShadowButton>
                 </div>
               </>
             ) : (
@@ -197,9 +199,9 @@ export default function Welcome() {
                 <div className="text-6xl mb-4">🌱</div>
                 <p className="text-gray-400 mb-2">No initial memories yet</p>
                 <p className="text-sm text-gray-500">Start coding with your agents and Shadow will capture your corrections automatically.</p>
-                <button onClick={finishOnboarding} className="mt-6 px-5 py-2.5 bg-purple-600 hover:bg-purple-700 rounded-lg text-sm font-medium">
+                <ShadowButton onClick={finishOnboarding} tone="primary" className="mt-6 px-5">
                   Enter Console →
-                </button>
+                </ShadowButton>
               </div>
             )}
           </div>
@@ -213,54 +215,56 @@ export default function Welcome() {
             <p className="text-xs text-gray-500 mb-8">
               Task: <span className="text-gray-300">{demoExample.task}</span>
               {examples.length > 1 && (
-                <button
+                <ShadowButton
                   onClick={() => setDemoIndex((demoIndex + 1) % examples.length)}
-                  className="ml-3 underline hover:text-gray-300"
+                  tone="subtle"
+                  className="ml-3 h-7 min-h-7 px-2 text-xs"
                 >
                   重新演示 ({demoIndex + 1}/{examples.length})
-                </button>
+                </ShadowButton>
               )}
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
               {/* Without Shadow */}
-              <div className="bg-gray-900 border border-red-500/30 rounded-xl p-6">
-                <div className="flex items-center gap-2 mb-4">
+              <ShadowCard className="border-red-500/30 p-6">
+                <Card.Header className="mb-4 flex items-center gap-2 p-0">
                   <XCircle size={18} className="text-red-400" />
                   <h3 className="font-semibold text-red-400">Without Shadow</h3>
-                </div>
-                <div className="bg-gray-950 rounded-lg p-4 font-mono text-sm space-y-1">
+                </Card.Header>
+                <Card.Content className="bg-gray-950 rounded-lg p-4 font-mono text-sm space-y-1">
                   {demoExample.before.map((line, i) => (
                     <p key={i} className={i === 0 ? 'text-red-300' : 'text-gray-500'}>{line}</p>
                   ))}
-                </div>
-              </div>
+                </Card.Content>
+              </ShadowCard>
 
               {/* With Shadow */}
-              <div className="bg-gray-900 border border-green-500/30 rounded-xl p-6">
-                <div className="flex items-center gap-2 mb-4">
+              <ShadowCard className="border-green-500/30 p-6">
+                <Card.Header className="mb-4 flex items-center gap-2 p-0">
                   <CheckCircle size={18} className="text-green-400" />
                   <h3 className="font-semibold text-green-400">With Shadow</h3>
-                </div>
-                <div className="bg-gray-950 rounded-lg p-4 font-mono text-sm space-y-1">
+                </Card.Header>
+                <Card.Content className="bg-gray-950 rounded-lg p-4 font-mono text-sm space-y-1">
                   {demoExample.after.map((line, i) => (
                     <p key={i} className={i === 0 ? 'text-green-300' : 'text-gray-500'}>{line}</p>
                   ))}
-                </div>
+                </Card.Content>
                 <div className="mt-3 text-xs text-purple-400">
                   ✓ Memory hit: "{demoExample.memory}"
                 </div>
-              </div>
+              </ShadowCard>
             </div>
 
             <div className="text-center py-4">
               <p className="text-lg mb-6">✨ <span className="font-semibold">The same mistake, this time it got it right.</span></p>
-              <button
+              <ShadowButton
                 onClick={finishOnboarding}
-                className="px-6 py-3 bg-purple-600 hover:bg-purple-700 rounded-lg font-medium transition-colors"
+                tone="primary"
+                className="px-6 py-3"
               >
                 Enter Console →
-              </button>
+              </ShadowButton>
             </div>
           </div>
         )}

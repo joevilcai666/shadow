@@ -3,6 +3,7 @@ package daemon
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"syscall"
 )
@@ -10,6 +11,9 @@ import (
 // acquireLock tries to get an exclusive lock on the PID file.
 // Returns a release function on success.
 func (d *Daemon) acquireLock() (func(), error) {
+	if err := os.MkdirAll(filepath.Dir(d.pidPath), 0755); err != nil {
+		return nil, fmt.Errorf("create pid dir: %w", err)
+	}
 	f, err := os.OpenFile(d.pidPath, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("open pid file: %w", err)

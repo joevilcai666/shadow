@@ -1,64 +1,77 @@
 # Shadow
 
-> Your AI agent memory layer — correct once, remember everywhere.
+> Your AI agent memory layer: correct once, remember everywhere.
 
-Shadow is a local-first daemon that captures your corrections to coding agents (Claude Code, Cursor, Codex, etc.) and turns them into persistent rules that work across all your tools.
+Shadow is a local-first macOS daemon for heavy coding-agent users. It captures correction signals, turns them into reviewable rules, and writes approved rules into the native context files your agents already read: `CLAUDE.md`, `.cursorrules`, `AGENTS.md`, and `.github/copilot-instructions.md`.
 
-## Quick Start
+## Install
 
 ```bash
-# Build from source
-make build
-
-# Run
-./shadow version
-./shadow start   # Onboarding wizard (coming soon)
-./shadow serve   # Start daemon + web console (coming soon)
+brew tap joevilcai666/shadow
+brew install shadow
 ```
+
+Or download a macOS archive from [GitHub Releases](https://github.com/joevilcai666/shadow/releases).
+
+## First Run
+
+```bash
+shadow start
+```
+
+`shadow start` registers the daemon with launchd, opens the terminal onboarding flow, scans the current project for initial candidate memories, installs safe git hooks when the current directory is a Git repo, and then offers to open the local web console.
+
+Approved rules sync into agent context files. New rules stay `candidate` until you approve them.
+
+## Commands
+
+```bash
+shadow status      # Check daemon status
+shadow open        # Open http://localhost:7878
+shadow review      # Review candidate rules in the terminal
+shadow serve       # Run the daemon in the foreground
+shadow stop        # Stop the launchd daemon
+shadow mcp         # Print MCP HTTP wiring
+shadow uninstall --clean-blocks
+```
+
+## Local-First Promise
+
+- Data stays under `~/.shadow/` by default.
+- No login is required for the local product chain.
+- Raw secrets are blocked by deny patterns before storage.
+- Managed blocks are removable with `shadow uninstall --clean-blocks`.
 
 ## Development
 
 ```bash
-# Install web dependencies
 make web-setup
-
-# Start dev environment (backend + web hot-reload)
-make dev
-
-# Run tests
+make build
 make test
-
-# Lint
-make lint
+make vet
 ```
 
-## Architecture
+Useful targets:
 
-```
-Shadow/
-├── cmd/shadow/          — CLI entry point
-├── internal/
-│   ├── daemon/          — Daemon core (process management, state machine)
-│   ├── capture/         — Capture engine (log reading, signal extraction)
-│   ├── distill/         — Rule distillation engine ("translator")
-│   ├── adapter/         — Adapter layer (Claude Code / Cursor / Codex)
-│   ├── storage/         — Storage layer (SQLite CRUD)
-│   ├── config/          — Configuration management
-│   └── server/          — HTTP API + WebSocket + embedded web UI
-├── web/                 — React SPA (Vite + TypeScript + Tailwind)
-├── migrations/          — SQLite migration files
-├── Makefile
-└── go.mod
+```bash
+make dev         # Go daemon + Vite dev server
+make web-static  # Build web/dist and copy it into internal/server/static
 ```
 
-## Tech Stack
+## Release Smoke Test
 
-| Layer | Technology |
-|-------|-----------|
-| Daemon / CLI | Go (cobra + bubbletea) |
-| Storage | SQLite (modernc.org/sqlite — pure Go, no CGO) |
-| Web UI | React + Vite + TypeScript + Tailwind CSS |
-| Embed | Go embed for single-binary distribution |
+```bash
+make build
+./shadow version
+./shadow serve
+./shadow open
+```
+
+For release packaging:
+
+```bash
+goreleaser release --snapshot --clean
+```
 
 ## License
 

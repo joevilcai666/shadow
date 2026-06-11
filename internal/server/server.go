@@ -257,6 +257,9 @@ func (s *Server) createRule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.wsHub.Broadcast(map[string]any{"event": "rule.created", "rule_id": rule.ID})
+	if rule.Status == "active" {
+		s.triggerAdapterSync()
+	}
 	writeJSON(w, http.StatusCreated, rule)
 }
 
@@ -276,12 +279,28 @@ func (s *Server) getRule(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) updateRule(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
-	var rule storage.Rule
-	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+	existing, err := s.ruleRepo.GetByID(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if existing == nil {
+		writeError(w, http.StatusNotFound, "rule not found")
+		return
+	}
+
+	var patch map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
 		return
 	}
+	rule := *existing
+	if err := applyRulePatch(&rule, patch); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	rule.ID = id
+	rule.CreatedAt = existing.CreatedAt
 	rule.UpdatedAt = storage.Now()
 
 	// Privacy check.
@@ -296,14 +315,25 @@ func (s *Server) updateRule(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.wsHub.Broadcast(map[string]any{"event": "rule.updated", "rule_id": id})
+	if existing.Status == "active" || rule.Status == "active" {
+		s.triggerAdapterSync()
+	}
 	writeJSON(w, http.StatusOK, rule)
 }
 
 func (s *Server) deleteRule(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
+	existing, err := s.ruleRepo.GetByID(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if err := s.ruleRepo.Delete(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if existing != nil && existing.Status == "active" {
+		s.triggerAdapterSync()
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
@@ -337,9 +367,17 @@ func (s *Server) getRuleVersions(w http.ResponseWriter, r *http.Request) {
 func (s *Server) rollbackRule(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	v, _ := strconv.Atoi(mux.Vars(r)["v"])
+	existing, err := s.ruleRepo.GetByID(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if err := s.versionRepo.Rollback(id, v, "rollback via web"); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if existing != nil && existing.Status == "active" {
+		s.triggerAdapterSync()
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "rolled back"})
 }
@@ -354,13 +392,19 @@ func (s *Server) batchRules(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	shouldSync := false
 	for _, id := range req.IDs {
 		switch req.Action {
 		case "delete":
+			rule, _ := s.ruleRepo.GetByID(id)
+			if rule != nil && rule.Status == "active" {
+				shouldSync = true
+			}
 			s.ruleRepo.Delete(id)
 		case "activate", "disable":
 			rule, _ := s.ruleRepo.GetByID(id)
 			if rule != nil {
+				wasActive := rule.Status == "active"
 				if req.Action == "activate" {
 					rule.Status = "active"
 				} else {
@@ -368,8 +412,14 @@ func (s *Server) batchRules(w http.ResponseWriter, r *http.Request) {
 				}
 				rule.UpdatedAt = storage.Now()
 				s.ruleRepo.Update(rule, "user", "batch "+req.Action)
+				if wasActive || rule.Status == "active" {
+					shouldSync = true
+				}
 			}
 		}
+	}
+	if shouldSync {
+		s.triggerAdapterSync()
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "batch complete"})
 }
@@ -435,6 +485,10 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 				"enabled":     cfg.Adapters.Codex.Enabled,
 				"global_path": cfg.Adapters.Codex.GlobalPath,
 			},
+			"copilot": map[string]any{
+				"enabled":     cfg.Adapters.Copilot.Enabled,
+				"global_path": cfg.Adapters.Copilot.GlobalPath,
+			},
 		},
 		"server": map[string]any{
 			"port": cfg.Server.Port,
@@ -449,80 +503,15 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON")
 		return
 	}
-	// Apply individual config updates.
-	cfg := s.configMgr.Get()
-	for key, val := range updates {
-		switch key {
-		case "capture_enabled":
-			if b, ok := val.(bool); ok {
-				cfg.Capture.Enabled = b
-			}
-		case "distill_threshold":
-			if s, ok := val.(string); ok {
-				cfg.Distill.Threshold = s
-			}
-		case "auto_activate_low_risk":
-			if b, ok := val.(bool); ok {
-				cfg.Distill.AutoActivateLowRisk = b
-			}
-		case "batch_mode":
-			if b, ok := val.(bool); ok {
-				cfg.Distill.BatchMode = b
-			}
-		case "llm_api_key":
-			if str, ok := val.(string); ok {
-				cfg.Distill.LLMAPIKey = str
-			}
-		case "llm_model":
-			if str, ok := val.(string); ok {
-				cfg.Distill.LLMModel = str
-			}
-		case "deny_patterns":
-			if arr, ok := val.([]any); ok {
-				patterns := make([]string, 0, len(arr))
-				for _, v := range arr {
-					if s, ok := v.(string); ok {
-						patterns = append(patterns, s)
-					}
-				}
-				cfg.Privacy.DenyPatterns = patterns
-			}
-		case "exclude_patterns":
-			if arr, ok := val.([]any); ok {
-				patterns := make([]string, 0, len(arr))
-				for _, v := range arr {
-					if s, ok := v.(string); ok {
-						patterns = append(patterns, s)
-					}
-				}
-				cfg.Privacy.ExcludePatterns = patterns
-			}
-		case "claude_code_enabled":
-			if b, ok := val.(bool); ok {
-				cfg.Adapters.ClaudeCode.Enabled = b
-			}
-		case "cursor_enabled":
-			if b, ok := val.(bool); ok {
-				cfg.Adapters.Cursor.Enabled = b
-			}
-		case "codex_enabled":
-			if b, ok := val.(bool); ok {
-				cfg.Adapters.Codex.Enabled = b
-			}
-		case "copilot_enabled":
-			if b, ok := val.(bool); ok {
-				cfg.Adapters.Copilot.Enabled = b
-			}
-		case "server_port":
-			if n, ok := val.(float64); ok {
-				cfg.Server.Port = int(n)
-			}
-		}
-	}
-	// Persist so the change survives a daemon restart.
-	if err := s.configMgr.SaveGlobal(); err != nil {
+	adapterChanged := false
+	if err := s.configMgr.UpdateGlobal(func(cfg *config.Config) {
+		adapterChanged = applyConfigUpdates(cfg, updates)
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "save config: "+err.Error())
 		return
+	}
+	if adapterChanged {
+		s.triggerAdapterSync()
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
@@ -546,14 +535,14 @@ func (s *Server) getDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"total_rules":     total,
-		"active_rules":    active,
-		"candidate_rules": candidate,
-		"disabled_rules":  disabled,
+		"total_rules":      total,
+		"active_rules":     active,
+		"candidate_rules":  candidate,
+		"disabled_rules":   disabled,
 		"conflicted_rules": conflicted,
-		"total_sources":   sourceCount,
-		"project_count":   projectCount,
-		"agent_stats":     agentStats,
+		"total_sources":    sourceCount,
+		"project_count":    projectCount,
+		"agent_stats":      agentStats,
 	})
 }
 
@@ -780,13 +769,13 @@ func (s *Server) gitSignal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	source := &storage.Source{
-		ID:                    storage.NewID(),
-		SignalType:            "git_revert",
-		SignalStrength:        "strong",
-		AgentName:             "git",
-		ProjectPath:           payload.Pwd,
-		RawSnippet:            snippet,
-		Timestamp:             storage.Now(),
+		ID:                     storage.NewID(),
+		SignalType:             "git_revert",
+		SignalStrength:         "strong",
+		AgentName:              "git",
+		ProjectPath:            payload.Pwd,
+		RawSnippet:             snippet,
+		Timestamp:              storage.Now(),
 		ConfidenceContribution: 0.7,
 	}
 	if err := s.sourceRepo.Create(source); err != nil {
@@ -865,21 +854,18 @@ func (s *Server) toggleAdapter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cfg := s.configMgr.Get()
-	switch name {
-	case "claude_code":
-		cfg.Adapters.ClaudeCode.Enabled = req.Enabled
-	case "cursor":
-		cfg.Adapters.Cursor.Enabled = req.Enabled
-	case "codex":
-		cfg.Adapters.Codex.Enabled = req.Enabled
-	case "copilot":
-		cfg.Adapters.Copilot.Enabled = req.Enabled
-	default:
+	if !isKnownAdapter(name) {
 		writeError(w, http.StatusNotFound, "adapter not found: "+name)
 		return
 	}
+	if err := s.configMgr.UpdateGlobal(func(cfg *config.Config) {
+		setAdapterEnabled(cfg, name, req.Enabled)
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "save config: "+err.Error())
+		return
+	}
 
+	s.triggerAdapterSync()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
@@ -907,4 +893,155 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func (s *Server) triggerAdapterSync() {
+	if s.onSyncAdapters == nil {
+		return
+	}
+	if err := s.onSyncAdapters(); err != nil {
+		slog.Warn("adapter sync hook failed", "error", err)
+	}
+}
+
+func applyRulePatch(rule *storage.Rule, patch map[string]json.RawMessage) error {
+	for key, raw := range patch {
+		switch key {
+		case "id", "version", "created_at", "updated_at":
+			continue
+		case "content":
+			if err := json.Unmarshal(raw, &rule.Content); err != nil {
+				return fmt.Errorf("invalid content")
+			}
+		case "scope":
+			if err := json.Unmarshal(raw, &rule.Scope); err != nil {
+				return fmt.Errorf("invalid scope")
+			}
+		case "project_path":
+			if err := json.Unmarshal(raw, &rule.ProjectPath); err != nil {
+				return fmt.Errorf("invalid project_path")
+			}
+		case "tags":
+			if err := json.Unmarshal(raw, &rule.Tags); err != nil {
+				return fmt.Errorf("invalid tags")
+			}
+			if rule.Tags == nil {
+				rule.Tags = []string{}
+			}
+		case "category":
+			if err := json.Unmarshal(raw, &rule.Category); err != nil {
+				return fmt.Errorf("invalid category")
+			}
+		case "trigger_context":
+			if err := json.Unmarshal(raw, &rule.TriggerContext); err != nil {
+				return fmt.Errorf("invalid trigger_context")
+			}
+		case "confidence":
+			if err := json.Unmarshal(raw, &rule.Confidence); err != nil {
+				return fmt.Errorf("invalid confidence")
+			}
+		case "status":
+			if err := json.Unmarshal(raw, &rule.Status); err != nil {
+				return fmt.Errorf("invalid status")
+			}
+		}
+	}
+	return nil
+}
+
+func applyConfigUpdates(cfg *config.Config, updates map[string]any) bool {
+	adapterChanged := false
+	for key, val := range updates {
+		switch key {
+		case "capture_enabled":
+			if b, ok := val.(bool); ok {
+				cfg.Capture.Enabled = b
+			}
+		case "distill_threshold":
+			if s, ok := val.(string); ok {
+				cfg.Distill.Threshold = s
+			}
+		case "auto_activate_low_risk":
+			if b, ok := val.(bool); ok {
+				cfg.Distill.AutoActivateLowRisk = b
+			}
+		case "batch_mode":
+			if b, ok := val.(bool); ok {
+				cfg.Distill.BatchMode = b
+			}
+		case "llm_api_key":
+			if str, ok := val.(string); ok {
+				cfg.Distill.LLMAPIKey = str
+			}
+		case "llm_model":
+			if str, ok := val.(string); ok {
+				cfg.Distill.LLMModel = str
+			}
+		case "deny_patterns":
+			if arr, ok := val.([]any); ok {
+				cfg.Privacy.DenyPatterns = stringsFromJSONValues(arr)
+			}
+		case "exclude_patterns":
+			if arr, ok := val.([]any); ok {
+				cfg.Privacy.ExcludePatterns = stringsFromJSONValues(arr)
+			}
+		case "claude_code_enabled":
+			if b, ok := val.(bool); ok {
+				cfg.Adapters.ClaudeCode.Enabled = b
+				adapterChanged = true
+			}
+		case "cursor_enabled":
+			if b, ok := val.(bool); ok {
+				cfg.Adapters.Cursor.Enabled = b
+				adapterChanged = true
+			}
+		case "codex_enabled":
+			if b, ok := val.(bool); ok {
+				cfg.Adapters.Codex.Enabled = b
+				adapterChanged = true
+			}
+		case "copilot_enabled":
+			if b, ok := val.(bool); ok {
+				cfg.Adapters.Copilot.Enabled = b
+				adapterChanged = true
+			}
+		case "server_port":
+			if n, ok := val.(float64); ok {
+				cfg.Server.Port = int(n)
+			}
+		}
+	}
+	return adapterChanged
+}
+
+func stringsFromJSONValues(values []any) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if s, ok := v.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func isKnownAdapter(name string) bool {
+	switch name {
+	case "claude_code", "cursor", "codex", "copilot":
+		return true
+	default:
+		return false
+	}
+}
+
+func setAdapterEnabled(cfg *config.Config, name string, enabled bool) {
+	switch name {
+	case "claude_code":
+		cfg.Adapters.ClaudeCode.Enabled = enabled
+	case "cursor":
+		cfg.Adapters.Cursor.Enabled = enabled
+	case "codex":
+		cfg.Adapters.Codex.Enabled = enabled
+	case "copilot":
+		cfg.Adapters.Copilot.Enabled = enabled
+	}
 }
