@@ -89,7 +89,7 @@ After the release finishes:
 ```bash
 brew update
 brew tap joevilcai666/shadow
-brew install shadow
+brew install --formula joevilcai666/shadow/shadow
 shadow version
 shadow start
 shadow status
