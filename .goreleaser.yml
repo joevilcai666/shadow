@@ -2,14 +2,14 @@ version: 2
 
 before:
   hooks:
-    - make web-build
+    - make web-static
 
 builds:
   - id: shadow
     main: ./cmd/shadow/
     binary: shadow
     env:
-      - CGO_ENABLED=1
+      - CGO_ENABLED=0
     goos:
       - darwin
       - linux

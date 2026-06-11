@@ -8,6 +8,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/joevilcai666/shadow/internal/config"
+	"github.com/joevilcai666/shadow/internal/storage"
 )
 
 func TestDaemonStatus(t *testing.T) {
@@ -93,6 +96,135 @@ func TestCaptureToggle(t *testing.T) {
 	}
 }
 
+func TestOnboardingScanScopesRulesAndSelectedAgentsToCurrentProject(t *testing.T) {
+	cwd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cwd, "go.mod"), []byte("module example.com/shadow-test"), 0644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, "CLAUDE.md"), []byte("Use table-driven tests."), 0644); err != nil {
+		t.Fatalf("write CLAUDE.md: %v", err)
+	}
+	dbPath := filepath.Join(t.TempDir(), "shadow.db")
+
+	msg := scanProject(
+		cwd,
+		dbPath,
+		[]CheckboxItem{{Label: "Codex"}},
+		[]string{"Claude Code", "Cursor"},
+	)()
+	done, ok := msg.(scanCompleteMsg)
+	if !ok {
+		t.Fatalf("scanProject returned %T, want scanCompleteMsg", msg)
+	}
+	if done.count == 0 {
+		t.Fatal("scan should generate or import candidate rules")
+	}
+
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	rules, err := storage.NewRuleRepo(db).List(storage.RuleFilter{Scope: "project"})
+	if err != nil {
+		t.Fatalf("list rules: %v", err)
+	}
+	if len(rules) == 0 {
+		t.Fatal("expected project-scoped rules")
+	}
+	for _, rule := range rules {
+		if rule.ProjectPath != cwd {
+			t.Errorf("rule %q project path = %q, want %q", rule.Content, rule.ProjectPath, cwd)
+		}
+	}
+
+	project, err := storage.NewProjectRepo(db).GetByPath(cwd)
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if project == nil {
+		t.Fatal("project should be registered")
+	}
+	if len(project.Agents) != 1 || project.Agents[0] != "Codex" {
+		t.Errorf("project agents = %#v, want only selected Codex", project.Agents)
+	}
+}
+
+func TestSyncAdaptersRemovesDisabledAdapterBlocks(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "shadow.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	ruleRepo := storage.NewRuleRepo(db)
+	projectPath := filepath.Join(dir, "repo")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+	if err := storage.NewProjectRepo(db).Create(&storage.Project{
+		ID:        storage.NewID(),
+		Path:      projectPath,
+		Name:      "repo",
+		Agents:    []string{"Cursor", "Codex"},
+		CreatedAt: storage.Now(),
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	for _, rule := range []*storage.Rule{
+		{
+			ID: storage.NewID(), Content: "Use pnpm", Scope: "global",
+			Tags: []string{}, Confidence: 0.9, Status: "active", Version: 1,
+			CreatedAt: storage.Now(), UpdatedAt: storage.Now(),
+		},
+		{
+			ID: storage.NewID(), Content: "Use table tests", Scope: "project", ProjectPath: projectPath,
+			Tags: []string{}, Confidence: 0.9, Status: "active", Version: 1,
+			CreatedAt: storage.Now(), UpdatedAt: storage.Now(),
+		},
+	} {
+		if err := ruleRepo.Create(rule); err != nil {
+			t.Fatalf("create rule: %v", err)
+		}
+	}
+
+	cfgMgr := config.NewManager(dir)
+	if err := cfgMgr.LoadGlobal(); err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if err := cfgMgr.UpdateGlobal(func(cfg *config.Config) {
+		cfg.Adapters.Cursor.Enabled = false
+		cfg.Adapters.Codex.Enabled = true
+	}); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	cursor := &fakeAdapter{name: "cursor", installed: true}
+	codex := &fakeAdapter{name: "codex", installed: true}
+	d := &Daemon{
+		state:     StateIdle,
+		db:        db,
+		configMgr: cfgMgr,
+		adapters:  nil,
+	}
+	d.adapters = append(d.adapters, cursor, codex)
+
+	d.syncAdapters()
+
+	if len(cursor.writes) != 0 {
+		t.Errorf("disabled cursor writes = %v, want none", cursor.writes)
+	}
+	if len(cursor.removes) != 2 {
+		t.Errorf("disabled cursor removes = %v, want global and project", cursor.removes)
+	}
+	if len(codex.writes) != 2 {
+		t.Errorf("enabled codex writes = %v, want global and project", codex.writes)
+	}
+}
+
 func TestSocketIPC(t *testing.T) {
 	dir := t.TempDir()
 	d, _ := New(Config{Version: "0.1.0", HomeDir: dir})
@@ -148,6 +280,17 @@ func TestSingleInstanceLock(t *testing.T) {
 		t.Fatalf("lock after release: %v", err)
 	}
 	release2()
+}
+
+func TestSingleInstanceLockCreatesFreshHomeDir(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "fresh", ".shadow")
+	d, _ := New(Config{Version: "test", HomeDir: home})
+
+	release, err := d.acquireLock()
+	if err != nil {
+		t.Fatalf("lock should create missing home dir: %v", err)
+	}
+	release()
 }
 
 func TestDaemonGracefulShutdown(t *testing.T) {
@@ -233,4 +376,29 @@ func containsSubstr(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+type fakeAdapter struct {
+	name      string
+	installed bool
+	writes    []string
+	removes   []string
+}
+
+func (f *fakeAdapter) Name() string { return f.name }
+
+func (f *fakeAdapter) IsInstalled() bool { return f.installed }
+
+func (f *fakeAdapter) WriteRules(_ []*storage.Rule, scope, projectPath string) error {
+	f.writes = append(f.writes, scope+":"+projectPath)
+	return nil
+}
+
+func (f *fakeAdapter) RemoveRules(scope, projectPath string) error {
+	f.removes = append(f.removes, scope+":"+projectPath)
+	return nil
+}
+
+func (f *fakeAdapter) TargetPath(scope, projectPath string) string {
+	return scope + ":" + projectPath
 }
