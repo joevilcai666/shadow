@@ -33,7 +33,7 @@ func TestOpenAndMigrate(t *testing.T) {
 	}
 
 	// Verify tables exist.
-	tables := []string{"rules", "sources", "versions", "config", "projects"}
+	tables := []string{"rules", "sources", "versions", "config", "projects", "events"}
 	for _, table := range tables {
 		var name string
 		err := db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", table).Scan(&name)
@@ -42,6 +42,54 @@ func TestOpenAndMigrate(t *testing.T) {
 		}
 	}
 
+}
+
+func TestEventRepoRecordsEffectivenessEvents(t *testing.T) {
+	db := openTestDB(t)
+	ruleRepo := NewRuleRepo(db)
+	eventRepo := NewEventRepo(db)
+
+	rule := &Rule{
+		ID: NewID(), Content: "Use pnpm", Scope: "global",
+		Tags: []string{"toolchain"}, Status: "active", Version: 1,
+		CreatedAt: Now(), UpdatedAt: Now(),
+	}
+	if err := ruleRepo.Create(rule); err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	for _, event := range []*Event{
+		{
+			ID: NewID(), RuleID: rule.ID, EventType: "rule_hit",
+			AgentName: "codex", ProjectPath: "/tmp/app", TargetPath: "AGENTS.md",
+			Details: "Aha demo memory hit", Timestamp: Now(),
+		},
+		{
+			ID: NewID(), RuleID: rule.ID, EventType: "sync_success",
+			AgentName: "codex", ProjectPath: "/tmp/app", TargetPath: "AGENTS.md",
+			Details: "wrote managed block", Timestamp: Now(),
+		},
+	} {
+		if err := eventRepo.Create(event); err != nil {
+			t.Fatalf("create event: %v", err)
+		}
+	}
+
+	counts, err := eventRepo.CountRuleHits()
+	if err != nil {
+		t.Fatalf("count rule hits: %v", err)
+	}
+	if counts[rule.ID] != 1 {
+		t.Fatalf("rule hit count = %d, want 1", counts[rule.ID])
+	}
+
+	latest, err := eventRepo.LatestByAgentEvent("codex", "sync_success")
+	if err != nil {
+		t.Fatalf("latest by agent: %v", err)
+	}
+	if latest == nil || latest.TargetPath != "AGENTS.md" {
+		t.Fatalf("latest sync event = %#v, want AGENTS.md target", latest)
+	}
 }
 
 func TestRuleCRUD(t *testing.T) {

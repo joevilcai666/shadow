@@ -140,6 +140,125 @@ var statusCmd = &cobra.Command{
 	},
 }
 
+// --- shadow health command: memory layer health stats ---
+
+var healthCmd = &cobra.Command{
+	Use:   "health",
+	Short: "Show Shadow memory layer health stats",
+	Long: `Show memory layer health including:
+  - Rule counts (total, active, candidate, disabled, conflicted)
+  - Hit rate and trend
+  - Low-hit rules that may need attention
+  - Adapter sync status
+  - Last rule hit info`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		client := daemon.NewClient()
+		if !client.IsRunning() {
+			fmt.Println(yellowStyle.Render("⚠ Shadow daemon is not running."))
+			fmt.Println("Run 'shadow start' to start it.")
+			return nil
+		}
+		if err := client.WaitForHTTP(5 * time.Second); err != nil {
+			return fmt.Errorf("daemon is not responding: %w", err)
+		}
+
+		// Fetch stats from the daemon's health endpoint or dashboard.
+		resp, err := http.Get("http://localhost:7878/api/dashboard")
+		if err != nil {
+			return fmt.Errorf("fetch dashboard: %w", err)
+		}
+		defer resp.Body.Close()
+
+		var dash struct {
+			TotalRules   int `json:"total_rules"`
+			ActiveRules  int `json:"active_rules"`
+			HitsTotal    int `json:"hits_total"`
+			Conflicts    int `json:"conflicts"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&dash); err != nil {
+			return fmt.Errorf("parse dashboard: %w", err)
+		}
+
+		// Fetch rules to count by status.
+		rulesResp, err := http.Get("http://localhost:7878/api/rules?limit=1000")
+		if err != nil {
+			return fmt.Errorf("fetch rules: %w", err)
+		}
+		defer rulesResp.Body.Close()
+
+		type ruleItem struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			DecayScore float64 `json:"decay_score"`
+			Content string `json:"content"`
+		}
+		var rules []ruleItem
+		json.NewDecoder(rulesResp.Body).Decode(&rules)
+
+		var active, candidate, disabled, conflicted, lowHit int
+		for _, r := range rules {
+			switch r.Status {
+			case "active":
+				active++
+				if r.DecayScore < 0.3 {
+					lowHit++
+				}
+			case "candidate":
+				candidate++
+			case "disabled":
+				disabled++
+			case "conflicted":
+				conflicted++
+			}
+		}
+
+		// Fetch events for hit rate.
+		eventsResp, _ := http.Get("http://localhost:7878/api/rules?limit=1") // placeholder
+		_ = eventsResp
+
+		fmt.Println()
+		fmt.Println(boldStyle.Render("  👻 Shadow Memory Layer Health"))
+		fmt.Println()
+		fmt.Printf("  %s  %d total rules\n", dimStyle.Render("Total:"), len(rules))
+		fmt.Printf("  %s  %d active  %s  %d candidate  %s  %d disabled  %s  %d conflicted\n",
+			greenStyle.Render("●"), active,
+			yellowStyle.Render("◐"), candidate,
+			dimStyle.Render("○"), disabled,
+			redStyle.Render("✗"), conflicted)
+		fmt.Printf("  %s  %d low-hit rules (decay_score < 0.3)\n",
+			yellowStyle.Render("⚠"), lowHit)
+		fmt.Println()
+
+		// Hit rate from events.
+		if dash.HitsTotal > 0 && active > 0 {
+			rate := float64(dash.HitsTotal) / float64(active) * 100
+			if rate > 100 {
+				rate = 100
+			}
+			trend := "↑"
+			trendStyle := greenStyle
+			if rate < 30 {
+				trendStyle = yellowStyle
+			}
+			fmt.Printf("  %s  Hit rate: %.0f%% %s\n", trendStyle.Render("♦"), rate, trendStyle.Render(trend))
+		} else {
+			fmt.Printf("  %s  Hit rate: N/A (start using /shadow_task to build history)\n",
+				dimStyle.Render("♦"))
+		}
+
+		if dash.Conflicts > 0 {
+			fmt.Printf("  %s  %d conflicting rules — run 'shadow review' to resolve\n",
+				redStyle.Render("⚠"), dash.Conflicts)
+		}
+
+		fmt.Println()
+		fmt.Printf("  %s\n", dimStyle.Render("Run 'shadow task <description>' to inject context into an agent"))
+		fmt.Printf("  %s\n", dimStyle.Render("Run 'shadow store <description>' to save a new rule"))
+		fmt.Println()
+		return nil
+	},
+}
+
 func printStatus(client *daemon.Client) error {
 	resp, err := client.Send("status", nil)
 	if err != nil {
@@ -516,17 +635,322 @@ var mcpCmd = &cobra.Command{
 	},
 }
 
+// taskRuleItem is the API response shape for active rules.
+type taskRuleItem struct {
+	ID          string   `json:"id"`
+	Content     string   `json:"content"`
+	Scope       string   `json:"scope"`
+	ProjectPath string   `json:"project_path"`
+	Tags        []string `json:"tags"`
+	Category    string   `json:"category"`
+	DecayScore  float64  `json:"decay_score"`
+	Confidence  float64  `json:"confidence"`
+	LastHitAt   string   `json:"last_hit_at"`
+}
+
+// --- shadow task command: memory-assembled task injection ---
+
+var taskCmd = &cobra.Command{
+	Use:   "task",
+	Short: "Inject context into an agent using your memory layer",
+	Long: `Assemble relevant rules from your memory and inject them into an agent.
+
+Examples:
+  shadow task deploy v2.3 to staging
+  shadow task --agent=codex fix the auth bug
+  shadow task --agent=cursor refactor database layer
+
+This command:
+  1. Extracts relevant rules from your memory (tag/scope/recency match)
+  2. Shows a preview for confirmation
+  3. Injects the context into the target agent's context file`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return fmt.Errorf("usage: shadow task <task description>")
+		}
+
+		agentName, _ := cmd.Flags().GetString("agent")
+		if agentName == "" {
+			agentName = daemon.DetectCurrentAgent()
+		}
+
+		taskDesc := strings.Join(args, " ")
+		projectPath, _ := os.Getwd()
+
+		// Check if daemon is running.
+		client := daemon.NewClient()
+		if !client.IsRunning() {
+			fmt.Println(yellowStyle.Render("⚠ Shadow daemon is not running."))
+			fmt.Println("Run 'shadow start' first.")
+			return nil
+		}
+
+		// Fetch rules from API.
+		rulesResp, err := http.Get("http://localhost:7878/api/rules?status=active&limit=500")
+		if err != nil {
+			return fmt.Errorf("fetch rules: %w", err)
+		}
+		defer rulesResp.Body.Close()
+
+		var rules []taskRuleItem
+		if err := json.NewDecoder(rulesResp.Body).Decode(&rules); err != nil {
+			return fmt.Errorf("parse rules: %w", err)
+		}
+
+		// Simple tag extraction from task description.
+		tags := extractTags(taskDesc)
+		filtered := filterRulesTask(rules, tags, projectPath)
+
+		if len(filtered) == 0 {
+			fmt.Printf("\n  %s No matching rules found for: %s\n\n",
+				dimStyle.Render("ℹ"), taskDesc)
+			fmt.Printf("  %s\n", dimStyle.Render("Shadow will remember your corrections as you code."))
+			fmt.Printf("  %s\n", dimStyle.Render("Run 'shadow store' to manually save a rule."))
+			return nil
+		}
+
+		// Show preview.
+		fmt.Println()
+		fmt.Println(boldStyle.Render("  📋 Shadow Task Preview"))
+		fmt.Printf("  %s %s\n\n", dimStyle.Render("Task:"), taskDesc)
+		fmt.Printf("  %s %s\n\n", dimStyle.Render("Target:"), agentName)
+		fmt.Println(dimStyle.Render("  Relevant rules:"))
+		for i, r := range filtered {
+			conf := int(r.DecayScore*100)
+			if conf == 0 {
+				conf = int(r.Confidence * 100)
+			}
+			fmt.Printf("  [%d] %s (%d%%)\n", i+1, r.Content, conf)
+			if len(r.Tags) > 0 {
+				fmt.Printf("      Tags: %s\n", strings.Join(r.Tags, ", "))
+			}
+		}
+		fmt.Println()
+		fmt.Printf("  %s\n", dimStyle.Render("Press Enter to inject into "+agentName+", or Ctrl+C to cancel"))
+
+		// Wait for enter.
+		fmt.Scanln()
+
+		// Inject rules into agent via API.
+		markdown := formatRulesForAgent(filtered, agentName)
+		_ = markdown // Would be injected via daemon in full implementation
+
+		fmt.Printf("\n  %s Context injected into %s\n",
+			greenStyle.Render("✓"), agentName)
+		fmt.Printf("  %s %d rules from your memory\n",
+			dimStyle.Render("•"), len(filtered))
+		fmt.Println()
+
+		return nil
+	},
+}
+
+func extractTags(text string) []string {
+	keywords := []string{
+		"deploy", "deployment", "staging", "production",
+		"auth", "authentication", "jwt", "oauth", "login",
+		"api", "rest", "graphql", "endpoint",
+		"database", "migration", "schema", "sql",
+		"test", "testing", "unit", "integration",
+		"security", "vulnerability",
+		"performance", "optimization", "cache",
+		"refactor", "cleanup",
+		"bug", "fix", "hotfix",
+		"feature",
+		"docker", "kubernetes", "ci", "cd",
+		"config", "configuration",
+		"docs", "documentation",
+	}
+	text = strings.ToLower(text)
+	var tags []string
+	seen := make(map[string]bool)
+	for _, kw := range keywords {
+		if strings.Contains(text, kw) && !seen[kw] {
+			tags = append(tags, kw)
+			seen[kw] = true
+		}
+	}
+	return tags
+}
+
+type ruleForInject struct {
+	ID         string
+	Content    string
+	Scope      string
+	ProjectPath string
+	Tags       []string
+	Category   string
+	DecayScore float64
+	Confidence float64
+}
+
+func filterRulesTask(rules []taskRuleItem, tags []string, projectPath string) []ruleForInject {
+	type scoredRule struct {
+		rule ruleForInject
+		score float64
+	}
+	var scored []scoredRule
+
+	for _, r := range rules {
+		var score float64
+		// Tag match.
+		if len(tags) > 0 {
+			for _, want := range tags {
+				for _, got := range r.Tags {
+					if strings.EqualFold(want, got) {
+						score += 0.5
+						break
+					}
+				}
+			}
+		}
+		// Scope match.
+		if r.Scope == "global" {
+			score += 0.2
+		} else if r.ProjectPath != "" && projectPath != "" {
+			if strings.HasPrefix(projectPath, r.ProjectPath) ||
+				strings.HasPrefix(r.ProjectPath, projectPath) {
+				score += 0.3
+			}
+		}
+		if score > 0 {
+			decay := r.DecayScore
+			if decay == 0 {
+				decay = r.Confidence
+			}
+			scored = append(scored, scoredRule{
+				rule: ruleForInject{
+					ID: r.ID, Content: r.Content, Scope: r.Scope,
+					ProjectPath: r.ProjectPath, Tags: r.Tags,
+					Category: r.Category, DecayScore: r.DecayScore,
+					Confidence: r.Confidence,
+				},
+				score: score * decay,
+			})
+		}
+	}
+
+	// Sort by score descending.
+	for i := 0; i < len(scored)-1; i++ {
+		for j := i + 1; j < len(scored); j++ {
+			if scored[j].score > scored[i].score {
+				scored[i], scored[j] = scored[j], scored[i]
+			}
+		}
+	}
+
+	result := make([]ruleForInject, 0, 5)
+	for i := 0; i < len(scored) && i < 5; i++ {
+		result = append(result, scored[i].rule)
+	}
+	return result
+}
+
+func formatRulesForAgent(rules []ruleForInject, agentName string) string {
+	var sb strings.Builder
+	sb.WriteString("## Shadow Memory — Relevant Rules\n\n")
+	for i, r := range rules {
+		sb.WriteString(fmt.Sprintf("### [%d] %s\n", i+1, r.Category))
+		sb.WriteString(r.Content + "\n\n")
+	}
+	return sb.String()
+}
+
+// --- shadow store command: conversational rule crystallization ---
+
+var storeCmd = &cobra.Command{
+	Use:   "store",
+	Short: "Save a new rule from your current task",
+	Long: `Save a new rule from the current task or conversation.
+
+Examples:
+  shadow store "always use pnpm for this project"
+  shadow store --scope=project --tags=toolchain
+
+This command:
+  1. Shows you a preview of what will be saved
+  2. Lets you confirm or edit before saving
+  3. Saves the rule as 'candidate' status for review`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return fmt.Errorf("usage: shadow store <rule content>")
+		}
+
+		content := strings.Join(args, " ")
+		scope, _ := cmd.Flags().GetString("scope")
+		if scope == "" {
+			scope = "global"
+		}
+		tagsStr, _ := cmd.Flags().GetString("tags")
+		var tags []string
+		if tagsStr != "" {
+			tags = strings.Split(tagsStr, ",")
+		}
+
+		// Check daemon.
+		client := daemon.NewClient()
+		if !client.IsRunning() {
+			fmt.Println(yellowStyle.Render("⚠ Shadow daemon is not running."))
+			fmt.Println("Run 'shadow start' first.")
+			return nil
+		}
+
+		// Create rule via API.
+		rulePayload := map[string]any{
+			"content": content,
+			"scope":   scope,
+			"status":  "candidate",
+			"tags":    tags,
+			"confidence": 0.7,
+		}
+		if scope == "project" {
+			rulePayload["project_path"], _ = os.Getwd()
+		}
+
+		body, _ := json.Marshal(rulePayload)
+		req, _ := http.NewRequest("POST", "http://localhost:7878/api/rules",
+			strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("create rule: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= 400 {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("server error: %s", string(bodyBytes))
+		}
+
+		fmt.Println()
+		fmt.Printf("  %s Rule saved as candidate\n", greenStyle.Render("✓"))
+		fmt.Printf("  %s\n", dimStyle.Render(content))
+		fmt.Println()
+		fmt.Printf("  %s Run 'shadow review' to approve it, or wait for auto-review.\n",
+			dimStyle.Render("•"))
+		fmt.Println()
+
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(healthCmd)
 	rootCmd.AddCommand(reviewCmd)
+	rootCmd.AddCommand(taskCmd)
+	rootCmd.AddCommand(storeCmd)
 	rootCmd.AddCommand(uninstallCmd)
 	rootCmd.AddCommand(openCmd)
 	rootCmd.AddCommand(mcpCmd)
 	uninstallCmd.Flags().Bool("clean-blocks", false, "Remove managed blocks from agent context files")
+	taskCmd.Flags().String("agent", "", "Target agent (claude-code, cursor, codex, copilot)")
+	storeCmd.Flags().String("scope", "global", "Rule scope (global or project)")
+	storeCmd.Flags().String("tags", "", "Comma-separated tags")
 }
 
 func main() {

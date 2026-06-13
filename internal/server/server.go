@@ -27,6 +27,7 @@ var staticAssets embed.FS
 type Server struct {
 	ruleRepo    *storage.RuleRepo
 	sourceRepo  *storage.SourceRepo
+	eventRepo   *storage.EventRepo
 	versionRepo *storage.VersionRepo
 	configRepo  *storage.ConfigRepo
 	projectRepo *storage.ProjectRepo
@@ -55,6 +56,7 @@ func (s *Server) SetControlHooks(toggleCapture, syncAdapters func() error) {
 func New(
 	ruleRepo *storage.RuleRepo,
 	sourceRepo *storage.SourceRepo,
+	eventRepo *storage.EventRepo,
 	versionRepo *storage.VersionRepo,
 	configRepo *storage.ConfigRepo,
 	projectRepo *storage.ProjectRepo,
@@ -65,6 +67,7 @@ func New(
 	s := &Server{
 		ruleRepo:    ruleRepo,
 		sourceRepo:  sourceRepo,
+		eventRepo:   eventRepo,
 		versionRepo: versionRepo,
 		configRepo:  configRepo,
 		projectRepo: projectRepo,
@@ -110,8 +113,10 @@ func (s *Server) routes() {
 	api.HandleFunc("/rules/{id}", s.updateRule).Methods("PUT")
 	api.HandleFunc("/rules/{id}", s.deleteRule).Methods("DELETE")
 	api.HandleFunc("/rules/{id}/timeline", s.getRuleTimeline).Methods("GET")
+	api.HandleFunc("/rules/{id}/events", s.getRuleEvents).Methods("GET")
 	api.HandleFunc("/rules/{id}/versions", s.getRuleVersions).Methods("GET")
 	api.HandleFunc("/rules/{id}/versions/{v}/rollback", s.rollbackRule).Methods("PUT")
+	api.HandleFunc("/rules/{id}/hit", s.recordRuleHit).Methods("POST")
 	api.HandleFunc("/rules/batch", s.batchRules).Methods("POST")
 
 	// Projects
@@ -125,6 +130,7 @@ func (s *Server) routes() {
 	// Dashboard
 	api.HandleFunc("/dashboard", s.getDashboard).Methods("GET")
 	api.HandleFunc("/dashboard/map", s.getDashboardMap).Methods("GET")
+	api.HandleFunc("/conflicts", s.listConflicts).Methods("GET")
 	api.HandleFunc("/stats", s.getStats).Methods("GET")
 
 	// Capture
@@ -351,6 +357,19 @@ func (s *Server) getRuleTimeline(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sources)
 }
 
+func (s *Server) getRuleEvents(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	events, err := s.eventRepo.ListByRuleID(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if events == nil {
+		events = []*storage.Event{}
+	}
+	writeJSON(w, http.StatusOK, events)
+}
+
 func (s *Server) getRuleVersions(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	versions, err := s.versionRepo.ListByRuleID(id)
@@ -422,6 +441,55 @@ func (s *Server) batchRules(w http.ResponseWriter, r *http.Request) {
 		s.triggerAdapterSync()
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "batch complete"})
+}
+
+func (s *Server) recordRuleHit(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	rule, err := s.ruleRepo.GetByID(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if rule == nil {
+		writeError(w, http.StatusNotFound, "rule not found")
+		return
+	}
+
+	var req struct {
+		AgentName   string `json:"agent_name"`
+		ProjectPath string `json:"project_path"`
+		TargetPath  string `json:"target_path"`
+		Details     string `json:"details"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	if req.AgentName == "" {
+		req.AgentName = "welcome_demo"
+	}
+	if req.ProjectPath == "" {
+		req.ProjectPath = rule.ProjectPath
+	}
+	if req.Details == "" {
+		req.Details = "rule matched demo prompt"
+	}
+
+	event := &storage.Event{
+		ID:          storage.NewID(),
+		RuleID:      id,
+		EventType:   "rule_hit",
+		AgentName:   req.AgentName,
+		ProjectPath: req.ProjectPath,
+		TargetPath:  req.TargetPath,
+		Details:     req.Details,
+		Timestamp:   storage.Now(),
+	}
+	if err := s.eventRepo.Create(event); err != nil {
+		writeError(w, http.StatusInternalServerError, "record hit: "+err.Error())
+		return
+	}
+	s.wsHub.Broadcast(map[string]any{"event": "rule.hit", "rule_id": id, "agent": event.AgentName})
+	writeJSON(w, http.StatusCreated, event)
 }
 
 func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
@@ -534,6 +602,30 @@ func (s *Server) getDashboard(w http.ResponseWriter, r *http.Request) {
 		projectCount = len(projects)
 	}
 
+	hitCounts, _ := s.eventRepo.CountRuleHits()
+	totalHits := 0
+	for _, count := range hitCounts {
+		totalHits += count
+	}
+	agentCoverage, _ := s.eventRepo.CountRuleHitsByAgent()
+	adapterSync := map[string]any{}
+	for _, name := range []string{"claude_code", "cursor", "codex", "copilot"} {
+		if latest, err := s.eventRepo.LatestSyncByAgent(name); err == nil && latest != nil {
+			adapterSync[name] = latest
+		}
+	}
+	health := []map[string]string{}
+	if active == 0 {
+		health = append(health, map[string]string{
+			"level": "warning", "message": "No active rules yet; review candidates to complete the memory loop.",
+		})
+	}
+	if totalHits == 0 && active > 0 {
+		health = append(health, map[string]string{
+			"level": "info", "message": "Active rules have synced, but no hit events have been observed yet.",
+		})
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"total_rules":      total,
 		"active_rules":     active,
@@ -543,6 +635,10 @@ func (s *Server) getDashboard(w http.ResponseWriter, r *http.Request) {
 		"total_sources":    sourceCount,
 		"project_count":    projectCount,
 		"agent_stats":      agentStats,
+		"total_rule_hits":  totalHits,
+		"agent_coverage":   agentCoverage,
+		"adapter_sync":     adapterSync,
+		"health":           health,
 	})
 }
 
@@ -568,9 +664,12 @@ func (s *Server) getDashboardMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	hitCounts, _ := s.eventRepo.CountRuleHits()
+
 	// Build nodes.
 	nodes := make([]map[string]any, 0, len(rules))
 	for _, rule := range rules {
+		sourceSnippet, agents := s.ruleEvidence(rule.ID)
 		nodes = append(nodes, map[string]any{
 			"id":              rule.ID,
 			"title":           firstLine(rule.Content, 40),
@@ -582,8 +681,9 @@ func (s *Server) getDashboardMap(w http.ResponseWriter, r *http.Request) {
 			"tags":            rule.Tags,
 			"trigger_context": rule.TriggerContext,
 			"project_path":    rule.ProjectPath,
-			"agents":          ruleAgents(rule.ProjectPath), // best-effort
-			"hit_count":       0,                            // filled later if you wire a counter
+			"agents":          agents,
+			"hit_count":       hitCounts[rule.ID],
+			"source_snippet":  sourceSnippet,
 			"created_at":      rule.CreatedAt,
 			"updated_at":      rule.UpdatedAt,
 		})
@@ -671,6 +771,50 @@ func (s *Server) getDashboardMap(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) listConflicts(w http.ResponseWriter, r *http.Request) {
+	rules, err := s.ruleRepo.List(storage.RuleFilter{Limit: 500})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, buildConflictPairs(rules))
+}
+
+func buildConflictPairs(rules []*storage.Rule) []map[string]any {
+	pairs := []map[string]any{}
+	for i := range rules {
+		if rules[i].Status != "conflicted" {
+			continue
+		}
+		bestJ, bestShared := -1, 0
+		for j := range rules {
+			if i == j {
+				continue
+			}
+			if rules[i].ProjectPath == "" || rules[i].ProjectPath != rules[j].ProjectPath {
+				continue
+			}
+			if shared := tagOverlap(rules[i].Tags, rules[j].Tags); shared > bestShared {
+				bestShared, bestJ = shared, j
+			}
+		}
+		if bestJ < 0 || bestShared == 0 {
+			continue
+		}
+		score := 0.7 + float64(bestShared)*0.1
+		if score > 1 {
+			score = 1
+		}
+		pairs = append(pairs, map[string]any{
+			"rule_a": rules[i],
+			"rule_b": rules[bestJ],
+			"score":  score,
+			"reason": "同项目共享 " + itoa(bestShared) + " 个标签，且其中一条规则处于 conflicted 状态",
+		})
+	}
+	return pairs
+}
+
 // classifyEdge maps a tag-overlap pair onto a sieve tier.
 //
 // Rule (逻辑是底线 — each branch is verifiable):
@@ -688,7 +832,7 @@ func classifyEdge(shared, tagsA, tagsB int, sameProject bool) (tier string, scor
 	if maxTags == 0 {
 		maxTags = 1
 	}
-	score = float64(shared)/float64(maxTags)
+	score = float64(shared) / float64(maxTags)
 	if sameProject {
 		score += 0.2
 	}
@@ -711,6 +855,37 @@ func classifyEdge(shared, tagsA, tagsB int, sameProject bool) (tier string, scor
 }
 
 // --- dashboard/map helpers ---
+
+func (s *Server) ruleEvidence(ruleID string) (string, []string) {
+	agentSet := map[string]struct{}{}
+	sourceSnippet := ""
+	sources, err := s.sourceRepo.ListByRuleID(ruleID)
+	if err == nil {
+		for _, source := range sources {
+			if sourceSnippet == "" && source.RawSnippet != "" {
+				sourceSnippet = source.RawSnippet
+			}
+			if source.AgentName != "" {
+				agentSet[source.AgentName] = struct{}{}
+			}
+		}
+	}
+	eventAgents, err := s.eventRepo.AgentsForRule(ruleID)
+	if err == nil {
+		for _, agent := range eventAgents {
+			agentSet[agent] = struct{}{}
+		}
+	}
+
+	agents := make([]string, 0, len(agentSet))
+	for agent := range agentSet {
+		agents = append(agents, agent)
+	}
+	if len(agents) == 0 {
+		agents = ruleAgents("")
+	}
+	return sourceSnippet, agents
+}
 
 // mapCategory collapses our internal category vocabulary into the 3
 // frontend buckets. Unknown categories fall into 'practice'.
@@ -904,37 +1079,58 @@ func (s *Server) listAdapters(w http.ResponseWriter, r *http.Request) {
 	backupDir := home + "/.shadow/backups"
 
 	adapters := []map[string]any{
-		{
+		s.adapterStatus(map[string]any{
 			"name":        "claude_code",
 			"label":       "Claude Code",
 			"installed":   adapter.NewClaudeCodeAdapter(backupDir).IsInstalled(),
 			"enabled":     s.configMgr.Get().Adapters.ClaudeCode.Enabled,
 			"target_path": "CLAUDE.md (project) + ~/.claude/CLAUDE.md (global)",
-		},
-		{
+		}),
+		s.adapterStatus(map[string]any{
 			"name":        "cursor",
 			"label":       "Cursor",
 			"installed":   adapter.NewCursorAdapter(backupDir).IsInstalled(),
 			"enabled":     s.configMgr.Get().Adapters.Cursor.Enabled,
 			"target_path": ".cursorrules (project) + ~/.cursorrules (global)",
-		},
-		{
+		}),
+		s.adapterStatus(map[string]any{
 			"name":        "codex",
 			"label":       "Codex",
 			"installed":   adapter.NewCodexAdapter(backupDir).IsInstalled(),
 			"enabled":     s.configMgr.Get().Adapters.Codex.Enabled,
 			"target_path": "AGENTS.md (project) + ~/AGENTS.md (global)",
-		},
-		{
+		}),
+		s.adapterStatus(map[string]any{
 			"name":        "copilot",
 			"label":       "GitHub Copilot",
 			"installed":   adapter.NewCopilotAdapter(backupDir).IsInstalled(),
 			"enabled":     s.configMgr.Get().Adapters.Copilot.Enabled,
 			"target_path": ".github/copilot-instructions.md (project) + ~/.copilot/instructions.md (global)",
-		},
+		}),
 	}
 
 	writeJSON(w, http.StatusOK, adapters)
+}
+
+func (s *Server) adapterStatus(base map[string]any) map[string]any {
+	name, _ := base["name"].(string)
+	base["last_sync_at"] = ""
+	base["last_error"] = ""
+	base["hit_count"] = 0
+	base["managed_block_status"] = "unknown"
+
+	if count, err := s.eventRepo.CountRuleHitsByAgentName(name); err == nil {
+		base["hit_count"] = count
+	}
+	if latest, err := s.eventRepo.LatestSyncByAgent(name); err == nil && latest != nil {
+		base["last_sync_at"] = latest.Timestamp
+		base["managed_block_status"] = "synced"
+		if latest.EventType == "sync_failure" {
+			base["last_error"] = latest.Details
+			base["managed_block_status"] = "error"
+		}
+	}
+	return base
 }
 
 func (s *Server) toggleAdapter(w http.ResponseWriter, r *http.Request) {

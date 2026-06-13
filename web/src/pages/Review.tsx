@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type Rule } from '../lib/api';
-import { CheckCircle, XCircle, Eye } from 'lucide-react';
+import { CheckCircle, XCircle, Eye, Globe2 } from 'lucide-react';
 import { Checkbox } from '@heroui/react';
 import { LoadingState, ShadowButton, ShadowCard, TagChip } from '../components/ui';
 import { useRealtimeRefresh } from '../lib/realtime';
@@ -55,6 +55,13 @@ export default function Review() {
     setProcessing(false);
   };
 
+  const promoteToGlobal = async (rule: Rule) => {
+    setProcessing(true);
+    await api.updateRule(rule.id, { scope: 'global', project_path: '' });
+    loadRules();
+    setProcessing(false);
+  };
+
   const batchAction = async (action: string) => {
     if (selected.size === 0) return;
     setProcessing(true);
@@ -97,6 +104,18 @@ export default function Review() {
 
                   {expanded.has(rule.id) && (
                     <div className="mt-3 pt-3 border-t border-gray-800 text-xs text-gray-500 space-y-1">
+                      <p>
+                        Why suggested: {rule.confidence >= 0.8
+                          ? 'strong repeated signal and safe to review quickly'
+                          : rule.confidence >= 0.5
+                            ? 'enough signal to review, but needs human confirmation'
+                            : 'weak signal; keep local unless the wording is obviously durable'}
+                      </p>
+                      <p>
+                        Health: {rule.scope === 'project'
+                          ? 'project-scoped; promote only if it should follow you across repos'
+                          : 'global-scoped; will affect every connected agent context'}
+                      </p>
                       {rule.trigger_context && <p>Trigger: {rule.trigger_context}</p>}
                       {rule.tags?.length > 0 && <p>Tags: {rule.tags.join(', ')}</p>}
                       <p>Created: {new Date(rule.created_at).toLocaleString()}</p>
@@ -118,6 +137,12 @@ export default function Review() {
                     <ShadowButton onClick={() => toggleExpand(rule.id)} tone="subtle" className="h-8 min-h-8 gap-1 text-xs">
                       <Eye size={12} /> {expanded.has(rule.id) ? 'Less' : 'Details'}
                     </ShadowButton>
+                    {rule.scope === 'project' && (
+                      <ShadowButton onClick={() => promoteToGlobal(rule)} isDisabled={processing}
+                        tone="subtle" className="h-8 min-h-8 gap-1 text-xs">
+                        <Globe2 size={12} /> Promote Global
+                      </ShadowButton>
+                    )}
                   </div>
                 </div>
               </div>

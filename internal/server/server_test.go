@@ -47,6 +47,7 @@ func testEnvWithDir(t *testing.T) (*Server, *sql.DB, string) {
 	s := New(
 		storage.NewRuleRepo(db),
 		storage.NewSourceRepo(db),
+		storage.NewEventRepo(db),
 		storage.NewVersionRepo(db),
 		storage.NewConfigRepo(db),
 		storage.NewProjectRepo(db),
@@ -272,6 +273,60 @@ func TestDashboard(t *testing.T) {
 	}
 }
 
+func TestDashboardIncludesEffectivenessMetrics(t *testing.T) {
+	s, db := testEnv(t)
+	ruleRepo := storage.NewRuleRepo(db)
+	eventRepo := storage.NewEventRepo(db)
+
+	rule := &storage.Rule{
+		ID: storage.NewID(), Content: "Use pnpm not npm", Scope: "global",
+		Tags: []string{"toolchain"}, Status: "active", Version: 1,
+		CreatedAt: storage.Now(), UpdatedAt: storage.Now(),
+	}
+	if err := ruleRepo.Create(rule); err != nil {
+		t.Fatalf("seed rule: %v", err)
+	}
+	for _, event := range []*storage.Event{
+		{
+			ID: storage.NewID(), RuleID: rule.ID, EventType: "rule_hit",
+			AgentName: "codex", ProjectPath: "/tmp/app", TargetPath: "AGENTS.md",
+			Details: "Aha demo memory hit", Timestamp: storage.Now(),
+		},
+		{
+			ID: storage.NewID(), EventType: "sync_success",
+			AgentName: "codex", ProjectPath: "/tmp/app", TargetPath: "AGENTS.md",
+			Details: "wrote 1 active rule", Timestamp: storage.Now(),
+		},
+	} {
+		if err := eventRepo.Create(event); err != nil {
+			t.Fatalf("seed event: %v", err)
+		}
+	}
+
+	req := newLocalRequest("GET", "/api/dashboard", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("dashboard status: %d", w.Code)
+	}
+
+	var data map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&data); err != nil {
+		t.Fatalf("decode dashboard: %v", err)
+	}
+	if data["total_rule_hits"].(float64) != 1 {
+		t.Fatalf("total_rule_hits = %v, want 1", data["total_rule_hits"])
+	}
+	coverage := data["agent_coverage"].(map[string]any)
+	if coverage["codex"].(float64) != 1 {
+		t.Fatalf("codex coverage = %v, want 1", coverage["codex"])
+	}
+	sync := data["adapter_sync"].(map[string]any)
+	if _, ok := sync["codex"]; !ok {
+		t.Fatalf("adapter_sync = %#v, want codex latest sync", sync)
+	}
+}
+
 func TestCreateProject(t *testing.T) {
 	s, _ := testEnv(t)
 
@@ -468,6 +523,62 @@ func TestDashboardMapEmpty(t *testing.T) {
 	}
 }
 
+func TestDashboardMapIncludesRuleHitCountAndSourceSnippet(t *testing.T) {
+	s, db := testEnv(t)
+	ruleRepo := storage.NewRuleRepo(db)
+	sourceRepo := storage.NewSourceRepo(db)
+	eventRepo := storage.NewEventRepo(db)
+
+	rule := &storage.Rule{
+		ID: storage.NewID(), Content: "Use pnpm not npm", Scope: "project", ProjectPath: "/tmp/app",
+		Tags: []string{"toolchain"}, Status: "active", Version: 1,
+		CreatedAt: storage.Now(), UpdatedAt: storage.Now(),
+	}
+	if err := ruleRepo.Create(rule); err != nil {
+		t.Fatalf("seed rule: %v", err)
+	}
+	if err := sourceRepo.Create(&storage.Source{
+		ID: storage.NewID(), RuleID: rule.ID, SignalType: "manual_edit",
+		SignalStrength: "strong", AgentName: "codex", ProjectPath: "/tmp/app",
+		RawSnippet: "Don't use npm, use pnpm", Timestamp: storage.Now(),
+	}); err != nil {
+		t.Fatalf("seed source: %v", err)
+	}
+	if err := eventRepo.Create(&storage.Event{
+		ID: storage.NewID(), RuleID: rule.ID, EventType: "rule_hit",
+		AgentName: "codex", ProjectPath: "/tmp/app", TargetPath: "AGENTS.md",
+		Details: "rule matched prompt", Timestamp: storage.Now(),
+	}); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+
+	req := newLocalRequest("GET", "/api/dashboard/map", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("map status: %d", w.Code)
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode map: %v", err)
+	}
+	nodes := resp["nodes"].([]any)
+	if len(nodes) != 1 {
+		t.Fatalf("nodes = %d, want 1", len(nodes))
+	}
+	node := nodes[0].(map[string]any)
+	if node["hit_count"].(float64) != 1 {
+		t.Fatalf("hit_count = %v, want 1", node["hit_count"])
+	}
+	if node["source_snippet"] != "Don't use npm, use pnpm" {
+		t.Fatalf("source_snippet = %v", node["source_snippet"])
+	}
+	agents := node["agents"].([]any)
+	if len(agents) != 1 || agents[0] != "codex" {
+		t.Fatalf("agents = %#v, want codex from source/hit evidence", agents)
+	}
+}
+
 func TestDashboardMapEdgesFromTagOverlap(t *testing.T) {
 	s, _ := testEnv(t)
 
@@ -614,6 +725,49 @@ func TestDashboardMapSieveTiers(t *testing.T) {
 	}
 	if !gotWhisper {
 		t.Error("expected at least one whisper edge (conflicted rule shares 1 tag with peers)")
+	}
+}
+
+func TestConflictPairsEndpointReturnsRealRelation(t *testing.T) {
+	s, db := testEnv(t)
+	ruleRepo := storage.NewRuleRepo(db)
+	active := &storage.Rule{
+		ID: storage.NewID(), Content: "Use pnpm", Scope: "project", ProjectPath: "/proj/x",
+		Tags: []string{"toolchain", "pnpm"}, Status: "active", Version: 1,
+		CreatedAt: storage.Now(), UpdatedAt: storage.Now(),
+	}
+	conflicted := &storage.Rule{
+		ID: storage.NewID(), Content: "Use npm", Scope: "project", ProjectPath: "/proj/x",
+		Tags: []string{"toolchain", "pnpm"}, Status: "conflicted", Version: 1,
+		CreatedAt: storage.Now(), UpdatedAt: storage.Now(),
+	}
+	for _, rule := range []*storage.Rule{active, conflicted} {
+		if err := ruleRepo.Create(rule); err != nil {
+			t.Fatalf("seed rule: %v", err)
+		}
+	}
+
+	req := newLocalRequest("GET", "/api/conflicts", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("conflicts status: %d, body: %s", w.Code, w.Body.String())
+	}
+	var pairs []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&pairs); err != nil {
+		t.Fatalf("decode conflicts: %v", err)
+	}
+	if len(pairs) != 1 {
+		t.Fatalf("pairs = %d, want 1", len(pairs))
+	}
+	if pairs[0]["reason"] == "" {
+		t.Fatalf("pair missing reason: %#v", pairs[0])
+	}
+	if pairs[0]["rule_a"].(map[string]any)["id"] != conflicted.ID {
+		t.Fatalf("rule_a should be the conflicted rule: %#v", pairs[0]["rule_a"])
+	}
+	if pairs[0]["rule_b"].(map[string]any)["id"] != active.ID {
+		t.Fatalf("rule_b should be the matching active rule: %#v", pairs[0]["rule_b"])
 	}
 }
 
