@@ -84,6 +84,9 @@ and the dashboard hit-rate summary.
   inverting it.
 - Surfaced the repeated-hit recurrence proxy in `shadow health`, keeping the CLI
   health check aligned with the dashboard effectiveness metrics.
+- Fixed localhost-only API host parsing so valid loopback hosts without explicit
+  ports (`localhost`, `127.0.0.1`, `::1`) are accepted while external hosts
+  remain forbidden.
 
 ## Performance Changes In This Pass
 
@@ -110,6 +113,12 @@ Run after this pass:
 - `go test ./internal/server -run "TestDashboardMap|TestConflictPairsEndpoint"`
 - `npm run build` from `web`
 - `go test ./internal/adapter ./internal/config ./internal/daemon ./internal/server`
+- `go vet ./...`
+- `npm run lint` from `web`
+- `go test ./internal/server -run TestLocalhostOnlyAcceptsLoopbackHostsWithoutPorts -count=1`
+- Browser smoke against `http://127.0.0.1:7878/`: dashboard rendered
+  Shadow console content and browser error logs were empty.
 
-Full verification should include `go test ./...`, `go vet ./...`, frontend lint,
-and a browser smoke test against the rebuilt local console.
+Release verification should continue to include `go test ./...`, `go vet ./...`,
+frontend lint, frontend build, and a browser smoke test against the rebuilt
+local console.

@@ -569,6 +569,21 @@ func TestLocalhostOnly(t *testing.T) {
 	}
 }
 
+func TestLocalhostOnlyAcceptsLoopbackHostsWithoutPorts(t *testing.T) {
+	s, _ := testEnv(t)
+
+	for _, host := range []string{"localhost", "127.0.0.1", "::1"} {
+		req := httptest.NewRequest("GET", "/api/rules", nil)
+		req.Host = host
+		w := httptest.NewRecorder()
+		s.router.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("host %q status: got %d, want %d. body: %s", host, w.Code, http.StatusOK, w.Body.String())
+		}
+	}
+}
+
 func TestMCPRoutesMounted(t *testing.T) {
 	s, _ := testEnv(t)
 

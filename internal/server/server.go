@@ -169,13 +169,21 @@ func (s *Server) routes() {
 // localhostOnly middleware rejects non-localhost requests.
 func localhostOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host, _, _ := net.SplitHostPort(r.Host)
-		if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+		if !isLocalhostHost(r.Host) {
 			http.Error(w, "Forbidden: localhost only", http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func isLocalhostHost(hostport string) bool {
+	host, _, err := net.SplitHostPort(hostport)
+	if err != nil {
+		host = hostport
+	}
+	host = strings.Trim(host, "[]")
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 func (s *Server) spaHandler() http.Handler {
