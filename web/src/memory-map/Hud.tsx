@@ -44,6 +44,8 @@ export function Hud({
   onFilterChange,
 }: Props) {
   const activeRate = stats.total > 0 ? (stats.active / stats.total * 100).toFixed(0) : '0';
+  const hitRate = Math.round(stats.hitRatePct ?? 0);
+  const recurrenceProxy = Math.round(stats.recurrenceProxyPct ?? 0);
 
   return (
     <div className="mm-hud" role="region" aria-label="Memory map controls">
@@ -61,6 +63,18 @@ export function Hud({
         <div className="mm-hud-stat">
           <span className="mm-hud-stat-value">+{stats.thisMonth}</span>
           <span>This month</span>
+        </div>
+        <div className="mm-hud-divider" />
+        <div className="mm-hud-stat">
+          <span className="mm-hud-stat-value mm-hud-stat-value--accent">{hitRate}%</span>
+          <span>Hit 7d</span>
+        </div>
+        <div className="mm-hud-divider" />
+        <div className="mm-hud-stat">
+          <span className={`mm-hud-stat-value ${recurrenceProxy > 0 ? 'mm-hud-stat-value--warn' : ''}`}>
+            {recurrenceProxy}%
+          </span>
+          <span>Repeat 7d</span>
         </div>
         {stats.conflicted > 0 && (
           <>

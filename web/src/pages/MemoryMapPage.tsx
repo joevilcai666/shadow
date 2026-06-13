@@ -40,6 +40,8 @@ export default function MemoryMapPage() {
         conflicted: dash.conflicted_rules,
         other: dash.disabled_rules,
         thisMonth: 0,
+        hitRatePct: dash.hit_rate?.hit_rate_pct ?? 0,
+        recurrenceProxyPct: dash.hit_rate?.recurrence_proxy_pct ?? 0,
         growth: { level: 1, progress: 0, nextLevelAt: 5, achievements: [] },
         byCategory: [],
       });

@@ -84,6 +84,25 @@ export interface DashboardData {
   agent_coverage: Record<string, number>;
   adapter_sync: Record<string, Event>;
   health: Array<{ level: string; message: string }>;
+  hit_rate?: HitRateData;
+}
+
+export interface HitRateData {
+  active_rules: number;
+  distinct_hit_rules_7d: number;
+  repeated_hit_rules_7d: number;
+  hit_rate_pct: number;
+  recurrence_proxy_pct: number;
+  hits_this_week: number;
+  hits_last_week: number;
+  trend: 'up' | 'down' | 'equal';
+  low_hit_count: number;
+  last_hit?: {
+    rule_id: string;
+    agent_name: string;
+    timestamp: string;
+    content?: string;
+  } | null;
 }
 
 export interface DashboardMapEdge {

@@ -795,6 +795,15 @@ func TestEventHitRateAggregation(t *testing.T) {
 		t.Errorf("distinct hit rules = %d, want 1", distinct)
 	}
 
+	// Repeated rules in 7 days = 1 because the same rule was hit 3x in-window.
+	repeated, err := eventRepo.CountRepeatedHitRulesLastDays(7)
+	if err != nil {
+		t.Fatalf("repeated: %v", err)
+	}
+	if repeated != 1 {
+		t.Errorf("repeated hit rules = %d, want 1", repeated)
+	}
+
 	// Latest hit exists.
 	latest, err := eventRepo.LatestRuleHit()
 	if err != nil {

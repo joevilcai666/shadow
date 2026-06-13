@@ -86,6 +86,8 @@ export interface MapStats {
   conflicted: number;
   other: number;
   thisMonth: number;
+  hitRatePct?: number;
+  recurrenceProxyPct?: number;
   growth: GrowthData;
   byCategory: ClusterStat[];
   edgeStats?: EdgeStats;   // 关联线分层统计（做减法透明度）

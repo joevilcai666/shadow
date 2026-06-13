@@ -153,6 +153,24 @@ func (r *EventRepo) DistinctHitRulesLastDays(days int) (int, error) {
 	return count, err
 }
 
+// CountRepeatedHitRulesLastDays returns distinct rule_ids with 2+ rule_hit
+// events in the window. This is a recurrence proxy: the same remembered rule
+// needed to surface more than once recently.
+func (r *EventRepo) CountRepeatedHitRulesLastDays(days int) (int, error) {
+	var count int
+	err := r.db.QueryRow(`
+		SELECT COUNT(*) FROM (
+			SELECT rule_id
+			FROM events
+			WHERE event_type = 'rule_hit' AND rule_id IS NOT NULL AND rule_id != ''
+			  AND datetime(timestamp) >= datetime(?)
+			GROUP BY rule_id
+			HAVING COUNT(*) >= 2
+		)`,
+		daysAgoRFC3339(days)).Scan(&count)
+	return count, err
+}
+
 // LatestRuleHit returns the most recent rule_hit event across all agents, or nil if none.
 func (r *EventRepo) LatestRuleHit() (*Event, error) {
 	row := r.db.QueryRow(`

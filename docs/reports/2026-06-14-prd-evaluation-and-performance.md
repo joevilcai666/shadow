@@ -26,15 +26,16 @@ and the dashboard hit-rate summary.
 | Safe sync preview | Implemented | `shadow sync --dry-run` reports adapter targets and pending managed-block changes without writing files |
 | Review flow | Implemented | `shadow review`, `/api/rules?status=candidate`, batch approve/reject |
 | Rule management UI/API | Implemented | CRUD, timeline, events, versions, rollback, config, adapters, conflicts |
-| Effectiveness dashboard | Implemented as proxy | hit-rate endpoint, rule-hit events, adapter sync status, memory map |
+| Effectiveness dashboard | Implemented as proxy | hit-rate endpoint, repeated-hit recurrence proxy, rule-hit events, adapter sync status, memory map |
 | Privacy boundary | Implemented | deny-pattern checks before rule/memory/source persistence |
 | Local export | Implemented | `GET /api/export` returns a local JSON package with rules and user memories |
 | Uninstall rollback | Mostly implemented | `shadow uninstall --clean-blocks` removes managed blocks for primary adapters |
 
 ## Remaining Product Gaps
 
-- The PRD's exact repeated-error recurrence metric is not directly measurable
-  yet. Current hit-rate is a useful proxy, not a replacement.
+- The PRD's exact user-perceived repeated-error recurrence metric is not
+  directly measurable yet. Current hit-rate and repeated-hit rule rate are
+  useful local proxies, not a replacement for explicit user feedback.
 - Web onboarding and Aha demo exist as UI surfaces, but should be tested with
   real seeded candidate rules in the next product QA pass.
 - Capture is broad enough for MVP validation, but more implicit signals
@@ -72,6 +73,9 @@ and the dashboard hit-rate summary.
   accidental global memories when a user mistypes the project/global switch.
 - Added a web Memories view that lists user memories, supports local search,
   deletes memories, and downloads the local export package from the console.
+- Added a repeated-hit recurrence proxy to `/api/stats/hit-rate` and the
+  Memory Map HUD: active rules hit more than once in the last 7 days divided by
+  active rules.
 
 ## Performance Changes In This Pass
 

@@ -1174,4 +1174,18 @@ func TestGetHitRate(t *testing.T) {
 	if last == nil || last["content"] != "r1" {
 		t.Errorf("last_hit = %#v, want content r1", last)
 	}
+
+	// A second hit for the same rule is the closest measurable recurrence proxy:
+	// repeated-hit active rules / active rules = 1 / 2 = 50%.
+	eventRepo.Create(&storage.Event{ID: storage.NewID(), RuleID: r1.ID, EventType: "rule_hit", AgentName: "codex", Timestamp: storage.Now()})
+	req = newLocalRequest("GET", "/api/stats/hit-rate", nil)
+	w = httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	json.NewDecoder(w.Body).Decode(&hr)
+	if hr["repeated_hit_rules_7d"].(float64) != 1 {
+		t.Errorf("repeated_hit_rules_7d = %v, want 1", hr["repeated_hit_rules_7d"])
+	}
+	if hr["recurrence_proxy_pct"].(float64) != 50 {
+		t.Errorf("recurrence_proxy_pct = %v, want 50", hr["recurrence_proxy_pct"])
+	}
 }

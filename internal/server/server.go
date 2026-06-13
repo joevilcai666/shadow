@@ -800,6 +800,7 @@ func (s *Server) getDashboard(w http.ResponseWriter, r *http.Request) {
 // aspirational Type-C (user-perceived) metric, which is not directly measurable.
 func (s *Server) computeHitRate(activeRules int) map[string]any {
 	distinct7d, _ := s.eventRepo.DistinctHitRulesLastDays(7)
+	repeated7d, _ := s.eventRepo.CountRepeatedHitRulesLastDays(7)
 	hitsThisWeek, _ := s.eventRepo.CountRuleHitsLastDays(7)
 	hitsLast14, _ := s.eventRepo.CountRuleHitsLastDays(14)
 	// last-week = hits in [7,14) days = (last 14) − (last 7).
@@ -829,6 +830,13 @@ func (s *Server) computeHitRate(activeRules int) map[string]any {
 			lowHit = 0
 		}
 	}
+	if activeRules > 0 && repeated7d > activeRules {
+		repeated7d = activeRules
+	}
+	recurrenceProxyPct := 0
+	if activeRules > 0 {
+		recurrenceProxyPct = repeated7d * 100 / activeRules
+	}
 
 	lastHit := map[string]any(nil)
 	if latest, err := s.eventRepo.LatestRuleHit(); err == nil && latest != nil {
@@ -846,7 +854,9 @@ func (s *Server) computeHitRate(activeRules int) map[string]any {
 	return map[string]any{
 		"active_rules":          activeRules,
 		"distinct_hit_rules_7d": distinct7d,
+		"repeated_hit_rules_7d": repeated7d,
 		"hit_rate_pct":          ratePct,
+		"recurrence_proxy_pct":  recurrenceProxyPct,
 		"hits_this_week":        hitsThisWeek,
 		"hits_last_week":        hitsLastWeek,
 		"trend":                 trend,
