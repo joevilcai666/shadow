@@ -60,6 +60,10 @@ func (a *CopilotAdapter) WriteRules(rules []*storage.Rule, scope, projectPath st
 	return nil
 }
 
+func (a *CopilotAdapter) PreviewRules(rules []*storage.Rule, scope, projectPath string) (*WriteResult, error) {
+	return a.mb.Preview(a.TargetPath(scope, projectPath), rulesToEntries(rules))
+}
+
 // RemoveRules strips the managed block from the Copilot context file
 // for the requested scope/project, leaving any hand-written content
 // untouched.

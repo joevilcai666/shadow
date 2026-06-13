@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/joevilcai666/shadow"
 	"github.com/joevilcai666/shadow/internal/adapter"
+	"github.com/joevilcai666/shadow/internal/config"
 	"github.com/joevilcai666/shadow/internal/daemon"
 	"github.com/joevilcai666/shadow/internal/storage"
 	"github.com/spf13/cobra"
@@ -475,6 +476,169 @@ func updateRule(id string, updates map[string]any) error {
 	}
 	defer resp.Body.Close()
 	return nil
+}
+
+// --- sync command: explicit adapter sync / dry-run preview ---
+
+type syncOptions struct {
+	homeDir string
+	dbPath  string
+	dryRun  bool
+	out     io.Writer
+}
+
+var syncCmd = &cobra.Command{
+	Use:   "sync",
+	Short: "Sync active rules into agent context files",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		home, _ := os.UserHomeDir()
+		return runSync(syncOptions{
+			homeDir: filepath.Join(home, ".shadow"),
+			dbPath:  storage.DefaultDBPath(),
+			dryRun:  dryRun,
+			out:     cmd.OutOrStdout(),
+		})
+	},
+}
+
+func runSync(opts syncOptions) error {
+	if opts.out == nil {
+		opts.out = os.Stdout
+	}
+	if opts.dbPath == "" {
+		opts.dbPath = storage.DefaultDBPath()
+	}
+	if opts.homeDir == "" {
+		home, _ := os.UserHomeDir()
+		opts.homeDir = filepath.Join(home, ".shadow")
+	}
+
+	db, err := storage.Open(opts.dbPath)
+	if err != nil {
+		return fmt.Errorf("open memory store: %w", err)
+	}
+	defer db.Close()
+
+	cfgMgr := config.NewManager(opts.homeDir)
+	if err := cfgMgr.LoadGlobal(); err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+	cfg := cfgMgr.Get()
+
+	ruleRepo := storage.NewRuleRepo(db)
+	projectRepo := storage.NewProjectRepo(db)
+	globalRules, err := ruleRepo.List(storage.RuleFilter{Status: "active", Scope: "global"})
+	if err != nil {
+		return fmt.Errorf("list global rules: %w", err)
+	}
+	projects, err := projectRepo.List()
+	if err != nil {
+		return fmt.Errorf("list projects: %w", err)
+	}
+
+	backupDir := filepath.Join(opts.homeDir, "backups")
+	adapters := []adapter.Adapter{
+		adapter.NewClaudeCodeAdapter(backupDir),
+		adapter.NewCursorAdapter(backupDir),
+		adapter.NewCodexAdapter(backupDir),
+		adapter.NewOpenClawAdapter(backupDir),
+		adapter.NewCopilotAdapter(backupDir),
+	}
+
+	prefix := "SYNC"
+	if opts.dryRun {
+		prefix = "DRY-RUN"
+	}
+	changes := 0
+
+	for _, a := range adapters {
+		if !config.AdapterEnabled(cfg, a.Name()) {
+			continue
+		}
+		if len(globalRules) > 0 {
+			changed, err := syncAdapterTarget(a, globalRules, "global", "", opts.dryRun)
+			if err != nil {
+				return err
+			}
+			if changed {
+				changes++
+			}
+			fmt.Fprintf(opts.out, "%s %s global -> %s (%d rule(s))\n",
+				prefix, a.Name(), a.TargetPath("global", ""), len(globalRules))
+		}
+
+		for _, p := range projects {
+			if !projectIncludesAgent(p, a.Name()) {
+				continue
+			}
+			projectRules, err := ruleRepo.List(storage.RuleFilter{
+				Status:      "active",
+				Scope:       "project",
+				ProjectPath: p.Path,
+			})
+			if err != nil {
+				return fmt.Errorf("list project rules for %s: %w", p.Path, err)
+			}
+			if len(projectRules) == 0 {
+				continue
+			}
+			changed, err := syncAdapterTarget(a, projectRules, "project", p.Path, opts.dryRun)
+			if err != nil {
+				return err
+			}
+			if changed {
+				changes++
+			}
+			fmt.Fprintf(opts.out, "%s %s project -> %s (%d rule(s))\n",
+				prefix, a.Name(), a.TargetPath("project", p.Path), len(projectRules))
+		}
+	}
+
+	if changes == 0 {
+		fmt.Fprintf(opts.out, "%s no changes\n", prefix)
+	}
+	return nil
+}
+
+func syncAdapterTarget(a adapter.Adapter, rules []*storage.Rule, scope, projectPath string, dryRun bool) (bool, error) {
+	if dryRun {
+		result, err := a.PreviewRules(rules, scope, projectPath)
+		if err != nil {
+			return false, fmt.Errorf("preview %s %s: %w", a.Name(), scope, err)
+		}
+		return result.Changed, nil
+	}
+	if err := a.WriteRules(rules, scope, projectPath); err != nil {
+		return false, fmt.Errorf("write %s %s: %w", a.Name(), scope, err)
+	}
+	return true, nil
+}
+
+func projectIncludesAgent(p *storage.Project, adapterName string) bool {
+	if p == nil || len(p.Agents) == 0 {
+		return true
+	}
+	for _, agentName := range p.Agents {
+		if normalizeAgentName(agentName) == adapterName {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeAgentName(name string) string {
+	n := strings.ToLower(strings.TrimSpace(name))
+	n = strings.ReplaceAll(n, "-", "_")
+	n = strings.ReplaceAll(n, " ", "_")
+	switch n {
+	case "claude", "claude_code":
+		return "claude_code"
+	case "github_copilot":
+		return "copilot"
+	default:
+		return n
+	}
 }
 
 // --- uninstall command with managed block cleanup ---
@@ -1053,12 +1217,14 @@ func init() {
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(healthCmd)
 	rootCmd.AddCommand(reviewCmd)
+	rootCmd.AddCommand(syncCmd)
 	rootCmd.AddCommand(taskCmd)
 	rootCmd.AddCommand(storeCmd)
 	rootCmd.AddCommand(storeMemoryCmd)
 	rootCmd.AddCommand(uninstallCmd)
 	rootCmd.AddCommand(openCmd)
 	rootCmd.AddCommand(mcpCmd)
+	syncCmd.Flags().Bool("dry-run", false, "Preview adapter writes without changing files")
 	uninstallCmd.Flags().Bool("clean-blocks", false, "Remove managed blocks from agent context files")
 	taskCmd.Flags().String("agent", "", "Target agent (claude-code, cursor, codex, openclaw, copilot)")
 	storeCmd.Flags().String("scope", "global", "Rule scope (global or project)")

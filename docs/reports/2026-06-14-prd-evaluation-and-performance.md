@@ -23,6 +23,7 @@ and the dashboard hit-rate summary.
 | Distill / crystallization | Implemented and wired | daemon starts a periodic distill loop, explicit signals become candidate rules |
 | Rule storage | Implemented | SQLite rules, sources, versions, events, projects, user memories |
 | Cross-agent output | Implemented | Claude Code, Cursor, Codex, OpenClaw, and Copilot adapters with managed-block writes |
+| Safe sync preview | Implemented | `shadow sync --dry-run` reports adapter targets and pending managed-block changes without writing files |
 | Review flow | Implemented | `shadow review`, `/api/rules?status=candidate`, batch approve/reject |
 | Rule management UI/API | Implemented | CRUD, timeline, events, versions, rollback, config, adapters, conflicts |
 | Effectiveness dashboard | Implemented as proxy | hit-rate endpoint, rule-hit events, adapter sync status, memory map |
@@ -55,6 +56,8 @@ and the dashboard hit-rate summary.
 - Added a local export package endpoint so users can export their rules and
   user memories without cloud sync, matching the PRD's "visible, deletable,
   exportable" data boundary and MVP export requirement.
+- Added explicit `shadow sync --dry-run` support so users can validate which
+  agent context files would change before performing a local sync.
 
 ## Performance Changes In This Pass
 

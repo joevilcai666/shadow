@@ -210,6 +210,7 @@ Approve or reject candidate rules in the terminal. Approved rules sync to all co
 | `shadow status` | Check daemon status |
 | `shadow open` | Open web console in browser |
 | `shadow review` | Review candidate rules in terminal |
+| `shadow sync --dry-run` | Preview adapter context-file writes without changing files |
 | `shadow serve` | Run daemon in foreground (dev) |
 | `shadow mcp` | Print MCP server wiring for agent hosts |
 | `shadow stop` | Stop the daemon |
@@ -224,6 +225,7 @@ Approve or reject candidate rules in the terminal. Approved rules sync to all co
 | Cursor | `.cursorrules` + `~/.cursorrules` | Project + Global |
 | GitHub Copilot | `.github/copilot-instructions.md` | Project |
 | Codex | `AGENTS.md` + `~/AGENTS.md` | Project + Global |
+| OpenClaw | `OPENCLAW.md` + `~/OPENCLAW.md` | Project + Global |
 
 ## Web Console
 

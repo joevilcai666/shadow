@@ -36,8 +36,8 @@ type BlockContent struct {
 
 // RuleEntry is a single rule to write in the managed block.
 type RuleEntry struct {
-	Content     string
-	Confidence  float64
+	Content    string
+	Confidence float64
 }
 
 // WriteResult contains the result of a write operation.
@@ -47,6 +47,7 @@ type WriteResult struct {
 	Handwritten  string // The user's original content (unchanged)
 	ManagedBlock string // The new managed block
 	Verified     bool
+	Changed      bool
 }
 
 // Write writes rules to a file using the managed block mechanism.
@@ -112,6 +113,7 @@ func (mb *ManagedBlock) Write(filePath string, rules []RuleEntry) (*WriteResult,
 		BackupPath:   backupPath,
 		Handwritten:  handwritten,
 		ManagedBlock: newBlock,
+		Changed:      string(existing) != newContent,
 	}
 
 	written, err := os.ReadFile(filePath)
@@ -134,6 +136,42 @@ func (mb *ManagedBlock) Write(filePath string, rules []RuleEntry) (*WriteResult,
 	mb.cleanBackups(filePath)
 
 	return result, nil
+}
+
+// Preview calculates the managed-block write result without touching the
+// filesystem. It is used by dry-run sync paths.
+func (mb *ManagedBlock) Preview(filePath string, rules []RuleEntry) (*WriteResult, error) {
+	sortedRules := append([]RuleEntry(nil), rules...)
+	sort.Slice(sortedRules, func(i, j int) bool {
+		return sortedRules[i].Confidence > sortedRules[j].Confidence
+	})
+
+	newBlock := mb.formatBlock(sortedRules)
+
+	existing, err := os.ReadFile(filePath)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	handwritten, _, err := mb.splitContent(string(existing))
+	if err != nil {
+		return nil, err
+	}
+
+	var newContent string
+	if strings.TrimSpace(handwritten) == "" && !strings.Contains(string(existing), blockBegin) {
+		newContent = newBlock + "\n"
+	} else {
+		newContent = strings.TrimSpace(handwritten) + "\n\n" + newBlock + "\n"
+	}
+
+	return &WriteResult{
+		FilePath:     filePath,
+		Handwritten:  handwritten,
+		ManagedBlock: newBlock,
+		Verified:     true,
+		Changed:      string(existing) != newContent,
+	}, nil
 }
 
 // Remove removes the managed block from a file, preserving handwritten content.

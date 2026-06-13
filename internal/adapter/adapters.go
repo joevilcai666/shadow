@@ -14,6 +14,7 @@ type Adapter interface {
 	Name() string
 	IsInstalled() bool
 	WriteRules(rules []*storage.Rule, scope, projectPath string) error
+	PreviewRules(rules []*storage.Rule, scope, projectPath string) (*WriteResult, error)
 	RemoveRules(scope, projectPath string) error
 	TargetPath(scope, projectPath string) string
 }
@@ -61,6 +62,10 @@ func (a *ClaudeCodeAdapter) WriteRules(rules []*storage.Rule, scope, projectPath
 	return nil
 }
 
+func (a *ClaudeCodeAdapter) PreviewRules(rules []*storage.Rule, scope, projectPath string) (*WriteResult, error) {
+	return a.mb.Preview(a.TargetPath(scope, projectPath), rulesToEntries(rules))
+}
+
 func (a *ClaudeCodeAdapter) RemoveRules(scope, projectPath string) error {
 	targetPath := a.TargetPath(scope, projectPath)
 	return a.mb.Remove(targetPath)
@@ -97,6 +102,7 @@ func (a *CursorAdapter) Name() string { return "cursor" }
 //   - macOS: /Applications/Cursor.app
 //   - Linux: ~/.local/share/cursor (Cursor's XDG_STATE_HOME)
 //   - Windows: %LOCALAPPDATA%\Programs\Cursor
+//
 // The legacy "always-installed" Cursor that wrote ai/ JSONL under
 // ~/Library/Application Support/Cursor is still detected by the
 // cursor.go parser's path probe, so users with the older install get
@@ -136,6 +142,10 @@ func (a *CursorAdapter) WriteRules(rules []*storage.Rule, scope, projectPath str
 		"verified", result.Verified,
 	)
 	return nil
+}
+
+func (a *CursorAdapter) PreviewRules(rules []*storage.Rule, scope, projectPath string) (*WriteResult, error) {
+	return a.mb.Preview(a.TargetPath(scope, projectPath), rulesToEntries(rules))
 }
 
 func (a *CursorAdapter) RemoveRules(scope, projectPath string) error {
@@ -184,6 +194,10 @@ func (a *OpenClawAdapter) WriteRules(rules []*storage.Rule, scope, projectPath s
 		"verified", result.Verified,
 	)
 	return nil
+}
+
+func (a *OpenClawAdapter) PreviewRules(rules []*storage.Rule, scope, projectPath string) (*WriteResult, error) {
+	return a.mb.Preview(a.TargetPath(scope, projectPath), rulesToEntries(rules))
 }
 
 func (a *OpenClawAdapter) RemoveRules(scope, projectPath string) error {

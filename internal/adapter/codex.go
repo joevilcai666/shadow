@@ -43,6 +43,10 @@ func (a *CodexAdapter) WriteRules(rules []*storage.Rule, scope, projectPath stri
 	return nil
 }
 
+func (a *CodexAdapter) PreviewRules(rules []*storage.Rule, scope, projectPath string) (*WriteResult, error) {
+	return a.mb.Preview(a.TargetPath(scope, projectPath), rulesToEntries(rules))
+}
+
 func (a *CodexAdapter) RemoveRules(scope, projectPath string) error {
 	return a.mb.Remove(a.TargetPath(scope, projectPath))
 }

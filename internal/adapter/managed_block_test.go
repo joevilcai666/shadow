@@ -49,6 +49,31 @@ func TestWriteToNewFile(t *testing.T) {
 	}
 }
 
+func TestPreviewDoesNotWriteFileOrBackup(t *testing.T) {
+	mb, dir := testManagedBlock(t)
+	filePath := filepath.Join(dir, "CLAUDE.md")
+
+	result, err := mb.Preview(filePath, []RuleEntry{{Content: "Use pnpm, not npm", Confidence: 0.9}})
+	if err != nil {
+		t.Fatalf("preview: %v", err)
+	}
+	if !result.Changed {
+		t.Fatal("preview should report a pending change for a missing target file")
+	}
+	if result.FilePath != filePath {
+		t.Fatalf("file path = %q, want %q", result.FilePath, filePath)
+	}
+	if !strings.Contains(result.ManagedBlock, "Use pnpm, not npm") {
+		t.Fatalf("managed block = %q, want previewed rule", result.ManagedBlock)
+	}
+	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
+		t.Fatalf("preview should not create target file, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "backups")); !os.IsNotExist(err) {
+		t.Fatalf("preview should not create backup dir, stat err = %v", err)
+	}
+}
+
 func TestWriteToExistingFileWithHandwrittenContent(t *testing.T) {
 	mb, dir := testManagedBlock(t)
 	filePath := filepath.Join(dir, "CLAUDE.md")

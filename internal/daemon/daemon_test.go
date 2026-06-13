@@ -459,6 +459,14 @@ func (f *fakeAdapter) WriteRules(_ []*storage.Rule, scope, projectPath string) e
 	return nil
 }
 
+func (f *fakeAdapter) PreviewRules(_ []*storage.Rule, scope, projectPath string) (*adapter.WriteResult, error) {
+	return &adapter.WriteResult{
+		FilePath: f.TargetPath(scope, projectPath),
+		Changed:  true,
+		Verified: true,
+	}, nil
+}
+
 func (f *fakeAdapter) RemoveRules(scope, projectPath string) error {
 	f.removes = append(f.removes, scope+":"+projectPath)
 	return nil
