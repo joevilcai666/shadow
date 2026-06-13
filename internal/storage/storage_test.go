@@ -228,6 +228,33 @@ func TestRuleFilterSearch(t *testing.T) {
 	}
 }
 
+func TestRuleStatusCounts(t *testing.T) {
+	db := openTestDB(t)
+	repo := NewRuleRepo(db)
+
+	for _, status := range []string{"active", "active", "candidate", "disabled", "conflicted"} {
+		rule := &Rule{
+			ID: NewID(), Content: "rule " + status, Scope: "global",
+			Tags: []string{}, Status: status, Version: 1,
+			CreatedAt: Now(), UpdatedAt: Now(),
+		}
+		if err := repo.Create(rule); err != nil {
+			t.Fatalf("create %s rule: %v", status, err)
+		}
+	}
+
+	counts, err := repo.StatusCounts()
+	if err != nil {
+		t.Fatalf("status counts: %v", err)
+	}
+	if counts.Total != 5 {
+		t.Fatalf("total = %d, want 5", counts.Total)
+	}
+	if counts.Active != 2 || counts.Candidate != 1 || counts.Disabled != 1 || counts.Conflicted != 1 {
+		t.Fatalf("counts = %#v, want active=2 candidate=1 disabled=1 conflicted=1", counts)
+	}
+}
+
 func TestSourceTimeline(t *testing.T) {
 	db := openTestDB(t)
 	ruleRepo := NewRuleRepo(db)

@@ -12,6 +12,15 @@ type RuleRepo struct {
 	db *sql.DB
 }
 
+// RuleStatusCounts contains the dashboard aggregate counts for rules.
+type RuleStatusCounts struct {
+	Total      int
+	Active     int
+	Candidate  int
+	Disabled   int
+	Conflicted int
+}
+
 // NewRuleRepo creates a new RuleRepo.
 func NewRuleRepo(db *sql.DB) *RuleRepo {
 	return &RuleRepo{db: db}
@@ -205,6 +214,39 @@ func (r *RuleRepo) Count(filter RuleFilter) (int, error) {
 	var count int
 	err := r.db.QueryRow(query, args...).Scan(&count)
 	return count, err
+}
+
+// StatusCounts returns all rule status totals with a single table scan.
+func (r *RuleRepo) StatusCounts() (RuleStatusCounts, error) {
+	var counts RuleStatusCounts
+	rows, err := r.db.Query(`
+		SELECT status, COUNT(*)
+		FROM rules
+		GROUP BY status`)
+	if err != nil {
+		return counts, fmt.Errorf("count rules by status: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return counts, err
+		}
+		counts.Total += count
+		switch status {
+		case "active":
+			counts.Active = count
+		case "candidate":
+			counts.Candidate = count
+		case "disabled":
+			counts.Disabled = count
+		case "conflicted":
+			counts.Conflicted = count
+		}
+	}
+	return counts, rows.Err()
 }
 
 func buildRuleQuery(f RuleFilter) (string, []any) {

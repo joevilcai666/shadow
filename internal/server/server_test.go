@@ -274,6 +274,40 @@ func TestDashboard(t *testing.T) {
 	}
 }
 
+func TestDashboardReturnsStatusCounts(t *testing.T) {
+	s, db := testEnv(t)
+	ruleRepo := storage.NewRuleRepo(db)
+	for _, status := range []string{"active", "candidate", "disabled", "conflicted"} {
+		rule := &storage.Rule{
+			ID: storage.NewID(), Content: "rule " + status, Scope: "global",
+			Tags: []string{}, Status: status, Version: 1,
+			CreatedAt: storage.Now(), UpdatedAt: storage.Now(),
+		}
+		if err := ruleRepo.Create(rule); err != nil {
+			t.Fatalf("seed %s rule: %v", status, err)
+		}
+	}
+
+	req := newLocalRequest("GET", "/api/dashboard", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("dashboard status: %d", w.Code)
+	}
+
+	var data map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&data); err != nil {
+		t.Fatalf("decode dashboard: %v", err)
+	}
+	if data["total_rules"].(float64) != 4 ||
+		data["active_rules"].(float64) != 1 ||
+		data["candidate_rules"].(float64) != 1 ||
+		data["disabled_rules"].(float64) != 1 ||
+		data["conflicted_rules"].(float64) != 1 {
+		t.Fatalf("dashboard counts = %#v", data)
+	}
+}
+
 func TestDashboardIncludesEffectivenessMetrics(t *testing.T) {
 	s, db := testEnv(t)
 	ruleRepo := storage.NewRuleRepo(db)

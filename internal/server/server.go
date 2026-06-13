@@ -681,11 +681,11 @@ func (s *Server) updateConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getDashboard(w http.ResponseWriter, r *http.Request) {
-	total, _ := s.ruleRepo.Count(storage.RuleFilter{})
-	active, _ := s.ruleRepo.Count(storage.RuleFilter{Status: "active"})
-	candidate, _ := s.ruleRepo.Count(storage.RuleFilter{Status: "candidate"})
-	disabled, _ := s.ruleRepo.Count(storage.RuleFilter{Status: "disabled"})
-	conflicted, _ := s.ruleRepo.Count(storage.RuleFilter{Status: "conflicted"})
+	statusCounts, err := s.ruleRepo.StatusCounts()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 
 	// Get source stats.
 	sourceCount, _ := s.sourceRepo.CountTotal()
@@ -711,23 +711,23 @@ func (s *Server) getDashboard(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	health := []map[string]string{}
-	if active == 0 {
+	if statusCounts.Active == 0 {
 		health = append(health, map[string]string{
 			"level": "warning", "message": "No active rules yet; review candidates to complete the memory loop.",
 		})
 	}
-	if totalHits == 0 && active > 0 {
+	if totalHits == 0 && statusCounts.Active > 0 {
 		health = append(health, map[string]string{
 			"level": "info", "message": "Active rules have synced, but no hit events have been observed yet.",
 		})
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"total_rules":      total,
-		"active_rules":     active,
-		"candidate_rules":  candidate,
-		"disabled_rules":   disabled,
-		"conflicted_rules": conflicted,
+		"total_rules":      statusCounts.Total,
+		"active_rules":     statusCounts.Active,
+		"candidate_rules":  statusCounts.Candidate,
+		"disabled_rules":   statusCounts.Disabled,
+		"conflicted_rules": statusCounts.Conflicted,
 		"total_sources":    sourceCount,
 		"project_count":    projectCount,
 		"agent_stats":      agentStats,
@@ -735,7 +735,7 @@ func (s *Server) getDashboard(w http.ResponseWriter, r *http.Request) {
 		"agent_coverage":   agentCoverage,
 		"adapter_sync":     adapterSync,
 		"health":           health,
-		"hit_rate":         s.computeHitRate(active),
+		"hit_rate":         s.computeHitRate(statusCounts.Active),
 	})
 }
 
