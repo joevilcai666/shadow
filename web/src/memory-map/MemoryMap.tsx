@@ -53,17 +53,49 @@ export function MemoryMap({ onOpenInRules, nodes: propNodes, relations: propRela
     category: 'all',
     status: 'all',
     agent: 'all',
-    edgeDensity: 0.4,   // 默认：信号线 + 每节点 top-3 结构线（做减法）
+    edgeDensity: 0.4,   // Default: signal + top structure edges; users can raise density.
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showHint, setShowHint] = useState(true);
 
-  // 节点位置（持久化用户拖动）
-  const initialLayout = useMemo(
-    () => computeLayout(dataNodes, dataRelations.map(r => ({ source: r.source, target: r.target }))),
+  // 节点位置（持久化用户拖动）。
+  // 布局计算在 Web Worker 中异步完成，不阻塞主线程渲染。
+  const layoutKey = useMemo(
+    () => `${dataNodes.map(n => n.id).join('|')}::${dataRelations.map(r => `${r.source}>${r.target}`).join('|')}`,
     [dataNodes, dataRelations]
   );
-  const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>(initialLayout.positions);
+  const [layout, setLayout] = useState<{ key: string; positions: Record<string, { x: number; y: number }> }>({
+    key: '',
+    positions: {},
+  });
+  const positions = layout.positions;
+  const layoutBusy = layout.key !== layoutKey;
+
+  useEffect(() => {
+    if (dataNodes.length === 0) return;
+    const worker = new Worker(
+      new URL('./layout.worker.ts', import.meta.url),
+      { type: 'module' }
+    );
+    worker.onmessage = (e: MessageEvent<{ positions: Record<string, { x: number; y: number }> }>) => {
+      setLayout({ key: layoutKey, positions: e.data.positions });
+      worker.terminate();
+    };
+    worker.onerror = () => {
+      // Fallback: compute synchronously if worker fails.
+      const result = computeLayout(
+        dataNodes,
+        dataRelations.map(r => ({ source: r.source, target: r.target }))
+      );
+      setLayout({ key: layoutKey, positions: result.positions });
+      worker.terminate();
+    };
+    worker.postMessage({
+      nodes: dataNodes,
+      relations: dataRelations.map(r => ({ source: r.source, target: r.target })),
+    });
+    return () => worker.terminate();
+  }, [dataNodes, dataRelations, layoutKey]);
 
   // 推开偏移（拖动中实时更新，停止后归零）
   const [pushOffsets, setPushOffsets] = useState<Record<string, { x: number; y: number }>>({});
@@ -258,7 +290,7 @@ export function MemoryMap({ onOpenInRules, nodes: propNodes, relations: propRela
   const handleNodeDragStop = useCallback(
     (_e: MouseEvent | TouchEvent, node: Node) => {
       setIsAnyDragging(false);
-      setPositions(prev => ({ ...prev, [node.id]: node.position }));
+      setLayout(prev => ({ ...prev, positions: { ...prev.positions, [node.id]: node.position } }));
       // 归零 → framer-motion spring 平滑回原位
       setPushOffsets({});
     },
@@ -298,9 +330,16 @@ export function MemoryMap({ onOpenInRules, nodes: propNodes, relations: propRela
       <div className="mm-canvas-bg" />
       <div className="mm-stardust" />
 
+      {layoutBusy && (
+        <div className="mm-layout-loading" role="status">
+          <div className="mm-layout-loading-spinner" />
+          <span>计算布局…</span>
+        </div>
+      )}
+
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={layoutBusy ? [] : nodes}
+        edges={layoutBusy ? [] : edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodeClick={handleNodeClick}
@@ -315,7 +354,8 @@ export function MemoryMap({ onOpenInRules, nodes: propNodes, relations: propRela
         nodesDraggable={true}
         nodesConnectable={false}
         elementsSelectable={true}
-        fitView
+        nodesFocusable={false}
+        fitView={!layoutBusy}
         fitViewOptions={{ padding: 0.25, maxZoom: 0.9 }}
         className="mm-flow"
       >

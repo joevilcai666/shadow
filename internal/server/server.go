@@ -25,18 +25,18 @@ var staticAssets embed.FS
 
 // Server is the HTTP API server for the Shadow web console.
 type Server struct {
-	ruleRepo      *storage.RuleRepo
-	sourceRepo    *storage.SourceRepo
-	eventRepo     *storage.EventRepo
-	versionRepo   *storage.VersionRepo
-	configRepo    *storage.ConfigRepo
-	projectRepo   *storage.ProjectRepo
+	ruleRepo       *storage.RuleRepo
+	sourceRepo     *storage.SourceRepo
+	eventRepo      *storage.EventRepo
+	versionRepo    *storage.VersionRepo
+	configRepo     *storage.ConfigRepo
+	projectRepo    *storage.ProjectRepo
 	userMemoryRepo *storage.UserMemoryRepo
-	configMgr     *config.Manager
-	router      *mux.Router
-	wsHub       *WebSocketHub
-	cfg         config.ServerConfig
-	mcpServer   *adapter.MCPServer
+	configMgr      *config.Manager
+	router         *mux.Router
+	wsHub          *WebSocketHub
+	cfg            config.ServerConfig
+	mcpServer      *adapter.MCPServer
 
 	// Optional callback hooks. The daemon wires these in after New() so
 	// the HTTP layer doesn't need to know about the capture engine or
@@ -357,9 +357,9 @@ func (s *Server) deleteRule(w http.ResponseWriter, r *http.Request) {
 
 // validMemoryCategories is the allow-list for UserMemory.Category.
 var validMemoryCategories = map[string]bool{
-	"preference":  true,
-	"convention":  true,
-	"context":     true,
+	"preference": true,
+	"convention": true,
+	"context":    true,
 }
 
 // createMemory stores a user-authored, cross-agent personal memory.
@@ -792,14 +792,14 @@ func (s *Server) computeHitRate(activeRules int) map[string]any {
 	}
 
 	return map[string]any{
-		"active_rules":            activeRules,
-		"distinct_hit_rules_7d":   distinct7d,
-		"hit_rate_pct":            ratePct,
-		"hits_this_week":          hitsThisWeek,
-		"hits_last_week":          hitsLastWeek,
-		"trend":                   trend,
-		"low_hit_count":           lowHit,
-		"last_hit":                lastHit,
+		"active_rules":          activeRules,
+		"distinct_hit_rules_7d": distinct7d,
+		"hit_rate_pct":          ratePct,
+		"hits_this_week":        hitsThisWeek,
+		"hits_last_week":        hitsLastWeek,
+		"trend":                 trend,
+		"low_hit_count":         lowHit,
+		"last_hit":              lastHit,
 	}
 }
 
@@ -825,18 +825,26 @@ func (s *Server) getHitRate(w http.ResponseWriter, r *http.Request) {
 // architecture / practice) by simple keyword match; otherwise the rule
 // falls into 'practice' as a safe default.
 func (s *Server) getDashboardMap(w http.ResponseWriter, r *http.Request) {
-	rules, err := s.ruleRepo.List(storage.RuleFilter{Limit: 500})
+	rules, err := s.ruleRepo.List(storage.RuleFilter{Limit: 300})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	hitCounts, _ := s.eventRepo.CountRuleHits()
+	ruleIDs := make([]string, 0, len(rules))
+	tagSets := make([]map[string]struct{}, len(rules))
+	for i, rule := range rules {
+		ruleIDs = append(ruleIDs, rule.ID)
+		tagSets[i] = newTagSet(rule.Tags)
+	}
+	sourceEvidence, _ := s.sourceRepo.EvidenceByRuleIDs(ruleIDs)
+	eventAgents, _ := s.eventRepo.AgentsByRuleIDs(ruleIDs)
 
 	// Build nodes.
 	nodes := make([]map[string]any, 0, len(rules))
 	for _, rule := range rules {
-		sourceSnippet, agents := s.ruleEvidence(rule.ID)
+		sourceSnippet, agents := mergeRuleEvidence(rule.ID, sourceEvidence, eventAgents)
 		nodes = append(nodes, map[string]any{
 			"id":              rule.ID,
 			"title":           firstLine(rule.Content, 40),
@@ -875,7 +883,7 @@ func (s *Server) getDashboardMap(w http.ResponseWriter, r *http.Request) {
 			if rules[i].ProjectPath == "" || rules[i].ProjectPath != rules[j].ProjectPath {
 				continue
 			}
-			if s := tagOverlap(rules[i].Tags, rules[j].Tags); s > bestShared {
+			if s := tagOverlapSet(tagSets[i], rules[j].Tags); s > bestShared {
 				bestShared, bestJ = s, j
 			}
 		}
@@ -916,7 +924,7 @@ func (s *Server) getDashboardMap(w http.ResponseWriter, r *http.Request) {
 
 	for i := 0; i < len(rules); i++ {
 		for j := i + 1; j < len(rules); j++ {
-			shared := tagOverlap(rules[i].Tags, rules[j].Tags)
+			shared := tagOverlapSet(tagSets[i], rules[j].Tags)
 			if shared == 0 {
 				stats["hidden"]++
 				continue
@@ -1107,6 +1115,29 @@ func (s *Server) ruleEvidence(ruleID string) (string, []string) {
 	return sourceSnippet, agents
 }
 
+func mergeRuleEvidence(ruleID string, sourceEvidence map[string]storage.SourceEvidence, eventAgents map[string]map[string]bool) (string, []string) {
+	agentSet := map[string]struct{}{}
+	sourceSnippet := ""
+	if ev, ok := sourceEvidence[ruleID]; ok {
+		sourceSnippet = ev.FirstSnippet
+		for agent := range ev.Agents {
+			agentSet[agent] = struct{}{}
+		}
+	}
+	for agent := range eventAgents[ruleID] {
+		agentSet[agent] = struct{}{}
+	}
+
+	agents := make([]string, 0, len(agentSet))
+	for agent := range agentSet {
+		agents = append(agents, agent)
+	}
+	if len(agents) == 0 {
+		agents = ruleAgents("")
+	}
+	return sourceSnippet, agents
+}
+
 // mapCategory collapses our internal category vocabulary into the 3
 // frontend buckets. Unknown categories fall into 'practice'.
 func mapCategory(category string, tags []string) string {
@@ -1151,9 +1182,23 @@ func tagOverlap(a, b []string) int {
 	if len(a) == 0 || len(b) == 0 {
 		return 0
 	}
-	seen := make(map[string]struct{}, len(a))
-	for _, t := range a {
-		seen[t] = struct{}{}
+	seen := newTagSet(a)
+	return tagOverlapSet(seen, b)
+}
+
+func newTagSet(tags []string) map[string]struct{} {
+	seen := make(map[string]struct{}, len(tags))
+	for _, t := range tags {
+		if t != "" {
+			seen[t] = struct{}{}
+		}
+	}
+	return seen
+}
+
+func tagOverlapSet(seen map[string]struct{}, b []string) int {
+	if len(seen) == 0 || len(b) == 0 {
+		return 0
 	}
 	n := 0
 	for _, t := range b {

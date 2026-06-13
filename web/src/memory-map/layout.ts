@@ -26,16 +26,17 @@ export function computeLayout(
   };
   for (const n of nodes) byCategory[n.category].push(n);
 
-  // 2. 初始化位置：每个节点在类别中心周围均匀分布
+  // 2. 初始化位置：每个节点在类别中心周围分布
+  //    节点多时增大散布半径，避免初始状态太密导致排斥爆炸
   const pos: Record<string, { x: number; y: number }> = {};
+  const totalNodes = nodes.length;
+  const baseRadius = Math.max(240, Math.sqrt(totalNodes) * 28);
   for (const [cat, list] of Object.entries(byCategory)) {
     const center = CATEGORY_CENTERS[cat as keyof typeof CATEGORY_CENTERS];
-    const radius = 140;
-    const n = list.length;
+    const n = list.length || 1;
     list.forEach((node, i) => {
-      // 螺旋分布（避免重叠）
       const angle = (i / n) * Math.PI * 2 + (cat === 'code' ? 0 : cat === 'architecture' ? 0.4 : 0.8);
-      const r = radius + (i % 3) * 24;
+      const r = baseRadius * (0.5 + 0.5 * (i / n));
       pos[node.id] = {
         x: center.x + Math.cos(angle) * r,
         y: center.y + Math.sin(angle) * r,
@@ -43,12 +44,16 @@ export function computeLayout(
     });
   }
 
-  // 3. 极简 force 迭代：节点排斥 + 关联吸引
-  const iterations = 300;
-  const repulsion = 4200;          // 排斥力（提高，避免重叠）
-  const attraction = 0.010;        // 关联吸引（降低，让节点不被拉太近）
-  const damping = 0.7;
-  const minDist = 75;              // 最小间距（提高，容纳大节点）
+  // 3. Force 迭代：节点排斥 + 关联吸引
+  //    迭代数减少（大 n 时足够）、排斥力降低、中心引力增强
+  //    坐标上限收紧，避免 SVG 数值溢出
+  const iterations = 120;
+  const repulsion = 1800;
+  const centerGravity = 0.004;
+  const attraction = 0.012;
+  const damping = 0.65;
+  const minDist = 70;
+  const maxCoord = 2200;
 
   // 索引关联
   const adj: Record<string, string[]> = {};
@@ -83,12 +88,12 @@ export function computeLayout(
       }
     }
 
-    // 类别中心吸引（轻）
+    // 类别中心吸引
     for (const n of nodes) {
-      const c = CATEGORY_CENTERS[n.category];
+      const c = CATEGORY_CENTERS[n.category] ?? CATEGORY_CENTERS.practice;
       const p = pos[n.id];
-      forces[n.id].fx += (c.x - p.x) * 0.0008;
-      forces[n.id].fy += (c.y - p.y) * 0.0008;
+      forces[n.id].fx += (c.x - p.x) * centerGravity;
+      forces[n.id].fy += (c.y - p.y) * centerGravity;
     }
 
     // 关联吸引
@@ -106,12 +111,17 @@ export function computeLayout(
       }
     }
 
-    // 应用 + 阻尼
+    // 应用 + 阻尼 + 边界裁剪
     for (const n of nodes) {
       const p = pos[n.id];
       const f = forces[n.id];
       p.x += f.fx * damping;
       p.y += f.fy * damping;
+      // 裁剪到安全范围，防止 SVG 坐标溢出
+      if (p.x > maxCoord) p.x = maxCoord;
+      if (p.x < -maxCoord) p.x = -maxCoord;
+      if (p.y > maxCoord) p.y = maxCoord;
+      if (p.y < -maxCoord) p.y = -maxCoord;
     }
   }
 

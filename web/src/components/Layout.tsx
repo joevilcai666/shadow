@@ -31,7 +31,7 @@ export default function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col bg-gray-950 text-gray-100 md:flex-row">
       {/* Sidebar */}
-      <aside className="flex w-full shrink-0 flex-col border-b border-gray-800 bg-gray-900 md:w-56 md:border-b-0 md:border-r">
+      <aside className="flex w-full shrink-0 flex-col border-b border-gray-800 bg-gray-900 md:w-56 md:border-b-0 md:border-r md:h-screen md:overflow-y-auto">
         <div className="border-b border-gray-800 p-4 md:p-5">
           <Link to="/" className="flex items-center gap-2 text-lg font-bold">
             <span className="text-purple-400 text-xl">👻</span>

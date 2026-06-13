@@ -8,7 +8,8 @@ import { ShadowButton } from '../components/ui';
 
 // 密度滑块标签：把 0-1 数值映射成人类可读的层级名
 function densityLabel(d: number): string {
-  if (d < 0.1) return '仅信号';
+  if (d < 0.05) return '隐藏';
+  if (d < 0.2) return '仅信号';
   if (d < 0.5) return '结构';
   if (d < 0.6) return '结构全';
   if (d < 0.9) return '低语';

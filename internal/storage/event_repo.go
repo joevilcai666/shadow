@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -231,6 +232,40 @@ func (r *EventRepo) AgentsForRule(ruleID string) ([]string, error) {
 	return agents, rows.Err()
 }
 
+// AgentsByRuleIDs returns distinct event agents for a batch of rules.
+func (r *EventRepo) AgentsByRuleIDs(ruleIDs []string) (map[string]map[string]bool, error) {
+	out := make(map[string]map[string]bool, len(ruleIDs))
+	if len(ruleIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(ruleIDs))
+	for i, id := range ruleIDs {
+		args[i] = id
+	}
+	rows, err := r.db.Query(`
+		SELECT DISTINCT rule_id, agent_name
+		FROM events
+		WHERE rule_id IN (`+eventPlaceholders(len(ruleIDs))+`)
+		  AND agent_name IS NOT NULL AND agent_name != ''
+		ORDER BY rule_id, agent_name`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query event agents: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var ruleID, agent string
+		if err := rows.Scan(&ruleID, &agent); err != nil {
+			return nil, err
+		}
+		if out[ruleID] == nil {
+			out[ruleID] = map[string]bool{}
+		}
+		out[ruleID][agent] = true
+	}
+	return out, rows.Err()
+}
+
 func scanEvent(row interface {
 	Scan(dest ...any) error
 }) (*Event, error) {
@@ -251,4 +286,11 @@ func scanEvent(row interface {
 
 func scanEventRows(rows *sql.Rows) (*Event, error) {
 	return scanEvent(rows)
+}
+
+func eventPlaceholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.TrimRight(strings.Repeat("?,", n), ",")
 }

@@ -3,11 +3,18 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 )
 
 // SourceRepo handles operations for rule source tracing.
 type SourceRepo struct {
 	db *sql.DB
+}
+
+// SourceEvidence is the compact source summary used by dashboard-style views.
+type SourceEvidence struct {
+	FirstSnippet string
+	Agents       map[string]bool
 }
 
 // NewSourceRepo creates a new SourceRepo.
@@ -60,6 +67,47 @@ func (r *SourceRepo) ListByRuleID(ruleID string) ([]*Source, error) {
 	return sources, rows.Err()
 }
 
+// EvidenceByRuleIDs returns first source snippet and source agents for a batch
+// of rules. It avoids one source query per map node.
+func (r *SourceRepo) EvidenceByRuleIDs(ruleIDs []string) (map[string]SourceEvidence, error) {
+	out := make(map[string]SourceEvidence, len(ruleIDs))
+	if len(ruleIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(ruleIDs))
+	for i, id := range ruleIDs {
+		args[i] = id
+	}
+	rows, err := r.db.Query(`
+		SELECT rule_id, COALESCE(agent_name,''), COALESCE(raw_snippet,'')
+		FROM sources
+		WHERE rule_id IN (`+placeholders(len(ruleIDs))+`)
+		ORDER BY timestamp ASC`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query source evidence: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var ruleID, agent, snippet string
+		if err := rows.Scan(&ruleID, &agent, &snippet); err != nil {
+			return nil, err
+		}
+		ev := out[ruleID]
+		if ev.Agents == nil {
+			ev.Agents = map[string]bool{}
+		}
+		if ev.FirstSnippet == "" && snippet != "" {
+			ev.FirstSnippet = snippet
+		}
+		if agent != "" {
+			ev.Agents[agent] = true
+		}
+		out[ruleID] = ev
+	}
+	return out, rows.Err()
+}
+
 // StatsBySignalType returns count of sources grouped by signal_type for a rule.
 func (r *SourceRepo) StatsBySignalType(ruleID string) (map[string]int, error) {
 	rows, err := r.db.Query(`
@@ -98,6 +146,13 @@ func scanSource(rows *sql.Rows) (*Source, error) {
 		s.RuleID = ruleID.String
 	}
 	return &s, nil
+}
+
+func placeholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.TrimRight(strings.Repeat("?,", n), ",")
 }
 
 // ListUnlinked returns sources that haven't been linked to any rule yet.

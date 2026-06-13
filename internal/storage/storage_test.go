@@ -271,6 +271,78 @@ func TestSourceTimeline(t *testing.T) {
 	}
 }
 
+func TestSourceRepoEvidenceByRuleIDs(t *testing.T) {
+	db := openTestDB(t)
+	ruleRepo := NewRuleRepo(db)
+	sourceRepo := NewSourceRepo(db)
+
+	r1 := &Rule{ID: NewID(), Content: "r1", Scope: "global", Tags: []string{}, Status: "active", Version: 1, CreatedAt: Now(), UpdatedAt: Now()}
+	r2 := &Rule{ID: NewID(), Content: "r2", Scope: "global", Tags: []string{}, Status: "active", Version: 1, CreatedAt: Now(), UpdatedAt: Now()}
+	for _, rule := range []*Rule{r1, r2} {
+		if err := ruleRepo.Create(rule); err != nil {
+			t.Fatalf("create rule: %v", err)
+		}
+	}
+	for _, source := range []*Source{
+		{ID: NewID(), RuleID: r1.ID, SignalType: "explicit_instruction", SignalStrength: "strong", AgentName: "claude-code", RawSnippet: "first snippet", Timestamp: "2026-01-01T00:00:00Z"},
+		{ID: NewID(), RuleID: r1.ID, SignalType: "manual_edit", SignalStrength: "medium", AgentName: "codex", RawSnippet: "second snippet", Timestamp: "2026-01-02T00:00:00Z"},
+		{ID: NewID(), RuleID: r2.ID, SignalType: "manual_mark", SignalStrength: "strong", AgentName: "cursor", RawSnippet: "other snippet", Timestamp: "2026-01-01T00:00:00Z"},
+	} {
+		if err := sourceRepo.Create(source); err != nil {
+			t.Fatalf("create source: %v", err)
+		}
+	}
+
+	evidence, err := sourceRepo.EvidenceByRuleIDs([]string{r1.ID, r2.ID})
+	if err != nil {
+		t.Fatalf("evidence: %v", err)
+	}
+	if evidence[r1.ID].FirstSnippet != "first snippet" {
+		t.Fatalf("r1 first snippet = %q, want first snippet", evidence[r1.ID].FirstSnippet)
+	}
+	if !evidence[r1.ID].Agents["claude-code"] || !evidence[r1.ID].Agents["codex"] {
+		t.Fatalf("r1 agents = %#v, want claude-code and codex", evidence[r1.ID].Agents)
+	}
+	if evidence[r2.ID].FirstSnippet != "other snippet" {
+		t.Fatalf("r2 first snippet = %q, want other snippet", evidence[r2.ID].FirstSnippet)
+	}
+}
+
+func TestEventRepoAgentsByRuleIDs(t *testing.T) {
+	db := openTestDB(t)
+	ruleRepo := NewRuleRepo(db)
+	eventRepo := NewEventRepo(db)
+
+	r1 := &Rule{ID: NewID(), Content: "r1", Scope: "global", Tags: []string{}, Status: "active", Version: 1, CreatedAt: Now(), UpdatedAt: Now()}
+	r2 := &Rule{ID: NewID(), Content: "r2", Scope: "global", Tags: []string{}, Status: "active", Version: 1, CreatedAt: Now(), UpdatedAt: Now()}
+	for _, rule := range []*Rule{r1, r2} {
+		if err := ruleRepo.Create(rule); err != nil {
+			t.Fatalf("create rule: %v", err)
+		}
+	}
+	for _, event := range []*Event{
+		{ID: NewID(), RuleID: r1.ID, EventType: "rule_hit", AgentName: "codex", Timestamp: Now()},
+		{ID: NewID(), RuleID: r1.ID, EventType: "rule_hit", AgentName: "claude-code", Timestamp: Now()},
+		{ID: NewID(), RuleID: r2.ID, EventType: "rule_hit", AgentName: "cursor", Timestamp: Now()},
+		{ID: NewID(), EventType: "sync_success", AgentName: "codex", Timestamp: Now()},
+	} {
+		if err := eventRepo.Create(event); err != nil {
+			t.Fatalf("create event: %v", err)
+		}
+	}
+
+	agents, err := eventRepo.AgentsByRuleIDs([]string{r1.ID, r2.ID})
+	if err != nil {
+		t.Fatalf("agents: %v", err)
+	}
+	if !agents[r1.ID]["codex"] || !agents[r1.ID]["claude-code"] {
+		t.Fatalf("r1 agents = %#v, want codex and claude-code", agents[r1.ID])
+	}
+	if !agents[r2.ID]["cursor"] {
+		t.Fatalf("r2 agents = %#v, want cursor", agents[r2.ID])
+	}
+}
+
 func TestVersionRollback(t *testing.T) {
 	db := openTestDB(t)
 	ruleRepo := NewRuleRepo(db)
