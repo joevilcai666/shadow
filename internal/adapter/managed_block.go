@@ -36,8 +36,13 @@ type BlockContent struct {
 
 // RuleEntry is a single rule to write in the managed block.
 type RuleEntry struct {
-	Content    string
-	Confidence float64
+	ID             string
+	Content        string
+	Scope          string
+	Tags           []string
+	TriggerContext string
+	Confidence     float64
+	Version        int
 }
 
 // WriteResult contains the result of a write operation.
@@ -233,7 +238,26 @@ func (mb *ManagedBlock) formatBlock(rules []RuleEntry) string {
 	lines = append(lines, fmt.Sprintf("%s [Shadow auto-managed rules — do not edit between markers]", mb.commentPrefix))
 
 	for _, r := range rules {
-		lines = append(lines, fmt.Sprintf("%s %s", mb.commentPrefix, r.Content))
+		lines = append(lines, fmt.Sprintf("%s Rule: %s", mb.commentPrefix, r.Content))
+		if r.Scope != "" {
+			lines = append(lines, fmt.Sprintf("%s Scope: %s", mb.commentPrefix, r.Scope))
+		}
+		if len(r.Tags) > 0 {
+			lines = append(lines, fmt.Sprintf("%s Tags: %s", mb.commentPrefix, strings.Join(r.Tags, ", ")))
+		}
+		if r.TriggerContext != "" {
+			lines = append(lines, fmt.Sprintf("%s Trigger: %s", mb.commentPrefix, r.TriggerContext))
+		}
+		if r.Confidence > 0 {
+			lines = append(lines, fmt.Sprintf("%s Confidence: %.0f%%", mb.commentPrefix, r.Confidence*100))
+		}
+		if r.Version > 0 {
+			lines = append(lines, fmt.Sprintf("%s Version: %d", mb.commentPrefix, r.Version))
+		}
+		if r.ID != "" {
+			lines = append(lines, fmt.Sprintf("%s Rule ID: %s", mb.commentPrefix, r.ID))
+		}
+		lines = append(lines, "")
 	}
 
 	lines = append(lines, blockEnd)

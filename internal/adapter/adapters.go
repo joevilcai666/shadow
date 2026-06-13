@@ -219,8 +219,13 @@ func rulesToEntries(rules []*storage.Rule) []RuleEntry {
 	for _, r := range rules {
 		if r.Status == "active" {
 			entries = append(entries, RuleEntry{
-				Content:    r.Content,
-				Confidence: r.Confidence,
+				ID:             r.ID,
+				Content:        r.Content,
+				Scope:          r.Scope,
+				Tags:           append([]string(nil), r.Tags...),
+				TriggerContext: r.TriggerContext,
+				Confidence:     r.Confidence,
+				Version:        r.Version,
 			})
 		}
 	}

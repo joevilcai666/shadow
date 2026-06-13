@@ -63,6 +63,48 @@ func TestClaudeCodeAdapterWriteRules(t *testing.T) {
 	}
 }
 
+func TestAdapterManagedBlockIncludesRuleMetadata(t *testing.T) {
+	dir := t.TempDir()
+	a := &ClaudeCodeAdapter{homeDir: dir, mb: NewManagedBlock(filepath.Join(dir, "backups"))}
+	if err := os.MkdirAll(filepath.Join(dir, ".claude"), 0755); err != nil {
+		t.Fatalf("mkdir .claude: %v", err)
+	}
+
+	rules := []*storage.Rule{
+		{
+			ID:             "rule_meta",
+			Content:        "Use pnpm instead of npm",
+			Status:         "active",
+			Scope:          "project",
+			Tags:           []string{"node", "tooling"},
+			TriggerContext: "manual correction from Codex",
+			Confidence:     0.9,
+			Version:        3,
+		},
+	}
+
+	if err := a.WriteRules(rules, "global", ""); err != nil {
+		t.Fatalf("write rules: %v", err)
+	}
+	content, err := os.ReadFile(a.TargetPath("global", ""))
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	text := string(content)
+	for _, want := range []string{
+		"Rule: Use pnpm instead of npm",
+		"Scope: project",
+		"Tags: node, tooling",
+		"Trigger: manual correction from Codex",
+		"Confidence: 90%",
+		"Version: 3",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("managed block missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestClaudeCodeAdapterPreservesExisting(t *testing.T) {
 	dir := t.TempDir()
 	backupDir := filepath.Join(dir, "backups")
@@ -207,7 +249,16 @@ func TestCopilotAdapterWriteAndRemove(t *testing.T) {
 
 func TestRulesToEntries(t *testing.T) {
 	rules := []*storage.Rule{
-		{Content: "Active", Status: "active", Confidence: 0.9},
+		{
+			ID:             "active_rule",
+			Content:        "Active",
+			Scope:          "project",
+			Tags:           []string{"one", "two"},
+			TriggerContext: "manual correction",
+			Status:         "active",
+			Confidence:     0.9,
+			Version:        2,
+		},
 		{Content: "Candidate", Status: "candidate", Confidence: 0.7},
 		{Content: "Disabled", Status: "disabled", Confidence: 0.5},
 	}
@@ -218,5 +269,14 @@ func TestRulesToEntries(t *testing.T) {
 	}
 	if entries[0].Content != "Active" {
 		t.Errorf("entry content: %q", entries[0].Content)
+	}
+	if entries[0].ID != "active_rule" || entries[0].Version != 2 {
+		t.Errorf("entry metadata: %#v", entries[0])
+	}
+	if strings.Join(entries[0].Tags, ",") != "one,two" {
+		t.Errorf("entry tags: %#v", entries[0].Tags)
+	}
+	if entries[0].TriggerContext != "manual correction" {
+		t.Errorf("entry trigger: %q", entries[0].TriggerContext)
 	}
 }
