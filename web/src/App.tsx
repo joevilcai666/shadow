@@ -6,6 +6,7 @@ import { LoadingState } from './components/ui';
 
 const MemoryMapPage = lazy(() => import('./pages/MemoryMapPage'));
 const Rules = lazy(() => import('./pages/Rules'));
+const Memories = lazy(() => import('./pages/Memories'));
 const Projects = lazy(() => import('./pages/Projects'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Welcome = lazy(() => import('./pages/Welcome'));
@@ -28,6 +29,7 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<MemoryMapPage />} />
                 <Route path="/rules" element={<Rules />} />
+                <Route path="/memories" element={<Memories />} />
                 <Route path="/rules/:id" element={<RuleDetail />} />
                 <Route path="/review" element={<Review />} />
                 <Route path="/conflicts" element={<Conflicts />} />

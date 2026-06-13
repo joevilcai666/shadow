@@ -1,6 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Activity, FileText, FolderOpen, Settings, Zap, CheckSquare, AlertTriangle } from 'lucide-react';
+import { Activity, Database, FileText, FolderOpen, Settings, Zap, CheckSquare, AlertTriangle } from 'lucide-react';
 import { Chip } from '@heroui/react';
 import { api } from '../lib/api';
 import { ShadowCard } from './ui';
@@ -9,6 +9,7 @@ import { useRealtimeRefresh } from '../lib/realtime';
 const navItems = [
   { path: '/', label: 'Dashboard', icon: Activity },
   { path: '/rules', label: 'Rules', icon: FileText },
+  { path: '/memories', label: 'Memories', icon: Database },
   { path: '/review', label: 'Review', icon: CheckSquare },
   { path: '/conflicts', label: 'Conflicts', icon: AlertTriangle },
   { path: '/projects', label: 'Projects', icon: FolderOpen },

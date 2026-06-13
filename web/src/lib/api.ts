@@ -188,6 +188,13 @@ export const api = {
   listConflicts: () => fetchAPI<ConflictPair[]>('/conflicts'),
   exportPackage: () => fetchAPI<ExportPackage>('/export'),
 
+  // User memories
+  listMemories: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return fetchAPI<UserMemory[]>(`/memories${qs}`);
+  },
+  deleteMemory: (id: string) => fetchAPI<void>(`/memories/${id}`, { method: 'DELETE' }),
+
   // Config
   getConfig: () => fetchAPI<Config>('/config'),
   updateConfig: (updates: Record<string, unknown>) => fetchAPI<void>('/config', { method: 'PUT', body: JSON.stringify(updates) }),

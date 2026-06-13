@@ -70,6 +70,8 @@ and the dashboard hit-rate summary.
   context is written to native agent files immediately after changes.
 - `shadow store-memory` now rejects invalid `--scope` values locally, preventing
   accidental global memories when a user mistypes the project/global switch.
+- Added a web Memories view that lists user memories, supports local search,
+  deletes memories, and downloads the local export package from the console.
 
 ## Performance Changes In This Pass
 
