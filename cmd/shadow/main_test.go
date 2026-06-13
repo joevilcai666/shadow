@@ -85,6 +85,15 @@ func TestStoreMemoryRejectsInvalidScope(t *testing.T) {
 	}
 }
 
+func TestFormatEffectivenessSummaryIncludesRepeatProxy(t *testing.T) {
+	got := formatEffectivenessSummary(2, 1, 25, "Use pnpm")
+	for _, want := range []string{"2 active", "1 low-hit", "repeat proxy: 25%", `last hit: "Use pnpm"`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("summary = %q, want %q", got, want)
+		}
+	}
+}
+
 func TestRunSyncWritesOnlyRegisteredProjectAgents(t *testing.T) {
 	dir := t.TempDir()
 	home := filepath.Join(dir, "home")

@@ -211,6 +211,7 @@ var healthCmd = &cobra.Command{
 			HitsThisWeek int            `json:"hits_this_week"`
 			HitsLastWeek int            `json:"hits_last_week"`
 			LowHitCount  int            `json:"low_hit_count"`
+			RepeatPct    int            `json:"recurrence_proxy_pct"`
 			Trend        string         `json:"trend"`
 			LastHit      map[string]any `json:"last_hit"`
 		}
@@ -243,7 +244,7 @@ var healthCmd = &cobra.Command{
 		fmt.Printf("  %s  Hit rate: %d%% %s  (this week)\n",
 			rateStyle.Render("♦"), hr.HitRatePct, rateStyle.Render(glyph))
 
-		fmt.Printf("  %s  %d active · %d low-hit", dimStyle.Render("•"), hr.ActiveRules, hr.LowHitCount)
+		fmt.Printf("  %s  %s", dimStyle.Render("•"), formatEffectivenessSummary(hr.ActiveRules, hr.LowHitCount, hr.RepeatPct, ""))
 		if hr.LastHit != nil {
 			agent, _ := hr.LastHit["agent_name"].(string)
 			content, _ := hr.LastHit["content"].(string)
@@ -272,6 +273,14 @@ var healthCmd = &cobra.Command{
 		fmt.Println()
 		return nil
 	},
+}
+
+func formatEffectivenessSummary(activeRules, lowHitCount, repeatProxyPct int, lastHit string) string {
+	summary := fmt.Sprintf("%d active · %d low-hit · repeat proxy: %d%%", activeRules, lowHitCount, repeatProxyPct)
+	if lastHit != "" {
+		summary += fmt.Sprintf(" · last hit: %q", lastHit)
+	}
+	return summary
 }
 
 func printStatus(client *daemon.Client) error {

@@ -82,6 +82,8 @@ and the dashboard hit-rate summary.
 - Fixed rule distillation cleanup for English negation corrections so inputs
   like "Don't use npm, use pnpm instead" preserve the intended rule instead of
   inverting it.
+- Surfaced the repeated-hit recurrence proxy in `shadow health`, keeping the CLI
+  health check aligned with the dashboard effectiveness metrics.
 
 ## Performance Changes In This Pass
 
