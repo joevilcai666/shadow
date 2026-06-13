@@ -188,22 +188,16 @@ var healthCmd = &cobra.Command{
 		defer rulesResp.Body.Close()
 
 		type ruleItem struct {
-			ID     string `json:"id"`
 			Status string `json:"status"`
-			DecayScore float64 `json:"decay_score"`
-			Content string `json:"content"`
 		}
 		var rules []ruleItem
 		json.NewDecoder(rulesResp.Body).Decode(&rules)
 
-		var active, candidate, disabled, conflicted, lowHit int
+		var active, candidate, disabled, conflicted int
 		for _, r := range rules {
 			switch r.Status {
 			case "active":
 				active++
-				if r.DecayScore < 0.3 {
-					lowHit++
-				}
 			case "candidate":
 				candidate++
 			case "disabled":
@@ -213,9 +207,25 @@ var healthCmd = &cobra.Command{
 			}
 		}
 
-		// Fetch events for hit rate.
-		eventsResp, _ := http.Get("http://localhost:7878/api/rules?limit=1") // placeholder
-		_ = eventsResp
+		// Hit-rate summary from the dedicated stats endpoint (SHADOW-039).
+		// Replaces the former placeholder hits_total/active estimate.
+		hrResp, err := http.Get("http://localhost:7878/api/stats/hit-rate")
+		if err != nil {
+			return fmt.Errorf("fetch hit-rate: %w", err)
+		}
+		var hr struct {
+			ActiveRules  int            `json:"active_rules"`
+			HitRatePct   int            `json:"hit_rate_pct"`
+			HitsThisWeek int            `json:"hits_this_week"`
+			HitsLastWeek int            `json:"hits_last_week"`
+			LowHitCount  int            `json:"low_hit_count"`
+			Trend        string         `json:"trend"`
+			LastHit      map[string]any `json:"last_hit"`
+		}
+		if err := json.NewDecoder(hrResp.Body).Decode(&hr); err != nil {
+			return fmt.Errorf("parse hit-rate: %w", err)
+		}
+		hrResp.Body.Close()
 
 		fmt.Println()
 		fmt.Println(boldStyle.Render("  👻 Shadow Memory Layer Health"))
@@ -226,26 +236,38 @@ var healthCmd = &cobra.Command{
 			yellowStyle.Render("◐"), candidate,
 			dimStyle.Render("○"), disabled,
 			redStyle.Render("✗"), conflicted)
-		fmt.Printf("  %s  %d low-hit rules (decay_score < 0.3)\n",
-			yellowStyle.Render("⚠"), lowHit)
 		fmt.Println()
 
-		// Hit rate from events.
-		if dash.HitsTotal > 0 && active > 0 {
-			rate := float64(dash.HitsTotal) / float64(active) * 100
-			if rate > 100 {
-				rate = 100
-			}
-			trend := "↑"
-			trendStyle := greenStyle
-			if rate < 30 {
-				trendStyle = yellowStyle
-			}
-			fmt.Printf("  %s  Hit rate: %.0f%% %s\n", trendStyle.Render("♦"), rate, trendStyle.Render(trend))
-		} else {
-			fmt.Printf("  %s  Hit rate: N/A (start using /shadow_task to build history)\n",
-				dimStyle.Render("♦"))
+		// Hit rate + trend (Type-A proxy metric, SHADOW-041).
+		trendGlyph := map[string]string{"up": "↑", "down": "↓", "equal": "="}
+		glyph := trendGlyph[hr.Trend]
+		if glyph == "" {
+			glyph = "·"
 		}
+		rateStyle := greenStyle
+		if hr.HitRatePct < 30 {
+			rateStyle = yellowStyle
+		}
+		fmt.Printf("  %s  Hit rate: %d%% %s  (this week)\n",
+			rateStyle.Render("♦"), hr.HitRatePct, rateStyle.Render(glyph))
+
+		fmt.Printf("  %s  %d active · %d low-hit", dimStyle.Render("•"), hr.ActiveRules, hr.LowHitCount)
+		if hr.LastHit != nil {
+			agent, _ := hr.LastHit["agent_name"].(string)
+			content, _ := hr.LastHit["content"].(string)
+			if content == "" {
+				content, _ = hr.LastHit["rule_id"].(string)
+			}
+			if len(content) > 48 {
+				content = content[:47] + "…"
+			}
+			if content != "" {
+				fmt.Printf(" · last hit: %s · %q", agent, content)
+			}
+		}
+		fmt.Println()
+		fmt.Printf("  %s  trend: %s · %d hits this week vs %d last week\n",
+			dimStyle.Render("•"), hr.Trend, hr.HitsThisWeek, hr.HitsLastWeek)
 
 		if dash.Conflicts > 0 {
 			fmt.Printf("  %s  %d conflicting rules — run 'shadow review' to resolve\n",
