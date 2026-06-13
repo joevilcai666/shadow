@@ -106,11 +106,7 @@ func (m OnboardingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case daemonCheckMsg:
 		m.daemonRunning = msg.running
 		m.loading = false
-		if msg.running {
-			m.step = 4
-		} else {
-			m.step = 2
-		}
+		m.step = 2
 		return m, bannerCmd
 	case agentDetectMsg:
 		m.agentsFound = msg.agents
@@ -164,10 +160,10 @@ func (m OnboardingModel) handleEnter() (tea.Model, tea.Cmd) {
 
 	switch m.step {
 	case 1:
-		m.loading = true
-		m.loadingMsg = "Registering daemon..."
-		m.spinner = NewSpinner(m.loadingMsg)
-		return m, tea.Batch(m.spinner.Init(), checkDaemon())
+		m.daemonRunning = true
+		m.step = 2
+		m.loading = false
+		return m, nil
 	case 2:
 		m.privacyAccepted = true
 		m.step = 3
@@ -183,7 +179,7 @@ func (m OnboardingModel) handleEnter() (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spinner.Init(), scanProject(m.cwd, m.dbPath, m.agents.SelectedItems(), m.agentsFound))
 	case 4:
 		if m.done {
-			openURL("http://localhost:7878")
+			openURL("http://localhost:7878/welcome")
 			return m, tea.Quit
 		}
 		// Start scan when not done yet.

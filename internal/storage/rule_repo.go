@@ -23,6 +23,14 @@ func (r *RuleRepo) Create(rule *Rule) error {
 	if err != nil {
 		return fmt.Errorf("marshal tags: %w", err)
 	}
+	sourcePathsJSON, err := json.Marshal(rule.SourcePaths)
+	if err != nil {
+		return fmt.Errorf("marshal source_paths: %w", err)
+	}
+	// Normalize author: empty string → "agent" (SQLite DEFAULT only fires on NULL)
+	if rule.Author == "" {
+		rule.Author = "agent"
+	}
 
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -31,11 +39,12 @@ func (r *RuleRepo) Create(rule *Rule) error {
 	defer tx.Rollback()
 
 	_, err = tx.Exec(`
-		INSERT INTO rules (id, content, scope, project_path, tags, category, trigger_context, confidence, status, version, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO rules (id, content, scope, project_path, tags, category, trigger_context, confidence, status, version, importance, decay_score, last_hit_at, source_paths, author, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		rule.ID, rule.Content, rule.Scope, rule.ProjectPath, string(tagsJSON),
 		rule.Category, rule.TriggerContext, rule.Confidence, rule.Status,
-		rule.Version, rule.CreatedAt, rule.UpdatedAt,
+		rule.Version, rule.Importance, rule.DecayScore, rule.LastHitAt, string(sourcePathsJSON),
+		rule.Author, rule.CreatedAt, rule.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert rule: %w", err)
@@ -58,7 +67,10 @@ func (r *RuleRepo) Create(rule *Rule) error {
 func (r *RuleRepo) GetByID(id string) (*Rule, error) {
 	row := r.db.QueryRow(`
 		SELECT id, content, scope, COALESCE(project_path,''), tags, COALESCE(category,''),
-		       COALESCE(trigger_context,''), confidence, status, version, created_at, updated_at
+		       COALESCE(trigger_context,''), confidence, status, version,
+		       COALESCE(importance,0.5), COALESCE(decay_score,0), COALESCE(last_hit_at,''),
+		       COALESCE(source_paths,'[]'), COALESCE(author,'agent'),
+		       created_at, updated_at
 		FROM rules WHERE id = ?`, id)
 
 	rule, err := scanRule(row)
@@ -82,6 +94,10 @@ func (r *RuleRepo) Update(rule *Rule, changedBy, reason string) error {
 	if err != nil {
 		return fmt.Errorf("marshal tags: %w", err)
 	}
+	sourcePathsJSON, err := json.Marshal(rule.SourcePaths)
+	if err != nil {
+		return fmt.Errorf("marshal source_paths: %w", err)
+	}
 
 	newVersion := oldRule.Version + 1
 	rule.Version = newVersion
@@ -95,11 +111,13 @@ func (r *RuleRepo) Update(rule *Rule, changedBy, reason string) error {
 	_, err = tx.Exec(`
 		UPDATE rules SET content=?, scope=?, project_path=?, tags=?, category=?,
 		                 trigger_context=?, confidence=?, status=?, version=?,
+		                 importance=?, decay_score=?, last_hit_at=?, source_paths=?, author=?,
 		                 updated_at=?
 		WHERE id = ?`,
 		rule.Content, rule.Scope, rule.ProjectPath, string(tagsJSON),
 		rule.Category, rule.TriggerContext, rule.Confidence, rule.Status,
-		newVersion, rule.UpdatedAt, rule.ID,
+		newVersion, rule.Importance, rule.DecayScore, rule.LastHitAt, string(sourcePathsJSON),
+		rule.Author, rule.UpdatedAt, rule.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update rule: %w", err)
@@ -123,6 +141,20 @@ func (r *RuleRepo) Delete(id string) error {
 	_, err := r.db.Exec("DELETE FROM rules WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete rule: %w", err)
+	}
+	return nil
+}
+
+// TouchHit refreshes a rule's last_hit_at and decay_score after a hit.
+// It is intentionally lightweight: a hit is not an edit, so no version
+// snapshot is created (avoids version-table churn). Callers compute the
+// new decay score via ComputeDecayScore(confidence, lastHitAt). (SHADOW-041)
+func (r *RuleRepo) TouchHit(id, lastHitAt string, decayScore float64) error {
+	_, err := r.db.Exec(`
+		UPDATE rules SET last_hit_at = ?, decay_score = ?, updated_at = datetime('now')
+		WHERE id = ?`, lastHitAt, decayScore, id)
+	if err != nil {
+		return fmt.Errorf("touch hit: %w", err)
 	}
 	return nil
 }
@@ -177,7 +209,10 @@ func (r *RuleRepo) Count(filter RuleFilter) (int, error) {
 
 func buildRuleQuery(f RuleFilter) (string, []any) {
 	q := `SELECT id, content, scope, COALESCE(project_path,''), tags, COALESCE(category,''),
-	              COALESCE(trigger_context,''), confidence, status, version, created_at, updated_at
+	              COALESCE(trigger_context,''), confidence, status, version,
+	              COALESCE(importance,0.5), COALESCE(decay_score,0), COALESCE(last_hit_at,''),
+	              COALESCE(source_paths,'[]'), COALESCE(author,'agent'),
+	              created_at, updated_at
 	      FROM rules WHERE 1=1`
 	var args []any
 
@@ -230,11 +265,13 @@ func buildRuleQuery(f RuleFilter) (string, []any) {
 
 func scanRule(row *sql.Row) (*Rule, error) {
 	var rule Rule
-	var tagsJSON string
+	var tagsJSON, sourcePathsJSON string
 	err := row.Scan(
 		&rule.ID, &rule.Content, &rule.Scope, &rule.ProjectPath,
 		&tagsJSON, &rule.Category, &rule.TriggerContext,
 		&rule.Confidence, &rule.Status, &rule.Version,
+		&rule.Importance, &rule.DecayScore, &rule.LastHitAt,
+		&sourcePathsJSON, &rule.Author,
 		&rule.CreatedAt, &rule.UpdatedAt,
 	)
 	if err != nil {
@@ -243,17 +280,23 @@ func scanRule(row *sql.Row) (*Rule, error) {
 	_ = json.Unmarshal([]byte(tagsJSON), &rule.Tags)
 	if rule.Tags == nil {
 		rule.Tags = []string{}
+	}
+	_ = json.Unmarshal([]byte(sourcePathsJSON), &rule.SourcePaths)
+	if rule.SourcePaths == nil {
+		rule.SourcePaths = []string{}
 	}
 	return &rule, nil
 }
 
 func scanRuleFromRows(rows *sql.Rows) (*Rule, error) {
 	var rule Rule
-	var tagsJSON string
+	var tagsJSON, sourcePathsJSON string
 	err := rows.Scan(
 		&rule.ID, &rule.Content, &rule.Scope, &rule.ProjectPath,
 		&tagsJSON, &rule.Category, &rule.TriggerContext,
 		&rule.Confidence, &rule.Status, &rule.Version,
+		&rule.Importance, &rule.DecayScore, &rule.LastHitAt,
+		&sourcePathsJSON, &rule.Author,
 		&rule.CreatedAt, &rule.UpdatedAt,
 	)
 	if err != nil {
@@ -262,6 +305,10 @@ func scanRuleFromRows(rows *sql.Rows) (*Rule, error) {
 	_ = json.Unmarshal([]byte(tagsJSON), &rule.Tags)
 	if rule.Tags == nil {
 		rule.Tags = []string{}
+	}
+	_ = json.Unmarshal([]byte(sourcePathsJSON), &rule.SourcePaths)
+	if rule.SourcePaths == nil {
+		rule.SourcePaths = []string{}
 	}
 	return &rule, nil
 }

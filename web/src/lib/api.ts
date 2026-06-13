@@ -51,6 +51,17 @@ export interface Version {
   timestamp: string;
 }
 
+export interface Event {
+  id: string;
+  rule_id?: string;
+  event_type: 'rule_hit' | 'sync_success' | 'sync_failure';
+  agent_name?: string;
+  project_path?: string;
+  target_path?: string;
+  details?: string;
+  timestamp: string;
+}
+
 export interface Project {
   id: string;
   path: string;
@@ -69,6 +80,10 @@ export interface DashboardData {
   total_sources: number;
   project_count: number;
   agent_stats: Record<string, number>;
+  total_rule_hits: number;
+  agent_coverage: Record<string, number>;
+  adapter_sync: Record<string, Event>;
+  health: Array<{ level: string; message: string }>;
 }
 
 export interface DashboardMapEdge {
@@ -98,6 +113,17 @@ export interface Adapter {
   installed: boolean;
   enabled: boolean;
   target_path: string;
+  last_sync_at: string;
+  last_error: string;
+  hit_count: number;
+  managed_block_status: 'unknown' | 'synced' | 'error';
+}
+
+export interface ConflictPair {
+  rule_a: Rule;
+  rule_b: Rule;
+  score: number;
+  reason: string;
 }
 
 export interface Config {
@@ -125,8 +151,10 @@ export const api = {
   updateRule: (id: string, data: Partial<Rule>) => fetchAPI<Rule>(`/rules/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteRule: (id: string) => fetchAPI<void>(`/rules/${id}`, { method: 'DELETE' }),
   getTimeline: (id: string) => fetchAPI<Source[]>(`/rules/${id}/timeline`),
+  getEvents: (id: string) => fetchAPI<Event[]>(`/rules/${id}/events`),
   getVersions: (id: string) => fetchAPI<Version[]>(`/rules/${id}/versions`),
   rollback: (id: string, version: number) => fetchAPI<void>(`/rules/${id}/versions/${version}/rollback`, { method: 'PUT' }),
+  recordRuleHit: (id: string, data: Partial<Event>) => fetchAPI<Event>(`/rules/${id}/hit`, { method: 'POST', body: JSON.stringify(data) }),
   batchRules: (action: string, ids: string[]) => fetchAPI<void>('/rules/batch', { method: 'POST', body: JSON.stringify({ action, ids }) }),
 
   // Projects
@@ -136,6 +164,7 @@ export const api = {
   // Dashboard
   getDashboard: () => fetchAPI<DashboardData>('/dashboard'),
   getDashboardMap: () => fetchAPI<DashboardMapData>('/dashboard/map'),
+  listConflicts: () => fetchAPI<ConflictPair[]>('/conflicts'),
 
   // Config
   getConfig: () => fetchAPI<Config>('/config'),

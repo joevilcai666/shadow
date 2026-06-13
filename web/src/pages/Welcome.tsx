@@ -6,6 +6,19 @@ import { Card, Checkbox } from '@heroui/react';
 import { LoadingState, ShadowButton, ShadowCard, TagChip } from '../components/ui';
 
 type Step = 'review' | 'demo' | 'done';
+type DemoExample = {
+  ruleId?: string;
+  task: string;
+  before: string[];
+  after: string[];
+  memory: string;
+  evidence: {
+    source: string;
+    rule: string;
+    target: string;
+    hit: string;
+  };
+};
 
 export default function Welcome() {
   const navigate = useNavigate();
@@ -13,6 +26,7 @@ export default function Welcome() {
   const [rules, setRules] = useState<Rule[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [recordedHits, setRecordedHits] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     api.listRules({ status: 'candidate' })
@@ -57,42 +71,87 @@ export default function Welcome() {
 
   // Demo data — cycles through the user's real rules if available,
   // otherwise falls back to a built-in roster of examples.
-  const SEED_EXAMPLES: { task: string; before: string[]; after: string[]; memory: string }[] = [
+  const SEED_EXAMPLES: DemoExample[] = [
     {
       task: 'Add a dependency installation script',
       before: ['$ npm install express', '✗ Used npm (you corrected this before)', '✗ Did not follow your project conventions'],
       after:  ['$ pnpm add express',         '✓ Automatically used pnpm',           '✓ Followed your project conventions'],
       memory: '本项目使用 pnpm，不要用 npm/yarn',
+      evidence: {
+        source: 'Local explainable demo',
+        rule: '本项目使用 pnpm，不要用 npm/yarn',
+        target: 'AGENTS.md / CLAUDE.md managed block',
+        hit: 'Simulated locally because no user rule is active yet',
+      },
     },
     {
       task: 'Name a new utility file',
       before: ['src/string_utils.ts',         '✗ Used snake_case (you said camelCase)', '✗ Did not respect the project naming convention'],
       after:  ['src/stringUtils.ts',          '✓ Used camelCase',                       '✓ Matches the project naming rule'],
       memory: '本项目使用 camelCase 命名，禁止 snake_case',
+      evidence: {
+        source: 'Local explainable demo',
+        rule: '本项目使用 camelCase 命名，禁止 snake_case',
+        target: 'Project agent context managed block',
+        hit: 'Simulated locally because no user rule is active yet',
+      },
     },
     {
       task: 'Write a test for a new function',
       before: ['import { test } from "jest"',  '✗ Used jest (project uses vitest)',   '✗ Has to be rewritten before CI runs'],
       after:  ['import { test } from "vitest"', '✓ Switched to vitest',                '✓ Matches the project testing stack'],
       memory: '测试用 vitest，不用 jest',
+      evidence: {
+        source: 'Local explainable demo',
+        rule: '测试用 vitest，不用 jest',
+        target: 'Project agent context managed block',
+        hit: 'Simulated locally because no user rule is active yet',
+      },
     },
     {
       task: 'Handle an error in a fetch call',
       before: ['throw new Error("network failed")', '✗ Throws across the data layer', '✗ Violates your error-handling convention'],
       after:  ['return Err("network failed")',       '✓ Returns Result type',         '✓ Matches your architecture rule'],
       memory: '错误处理优先使用 Result 类型而非 throw',
+      evidence: {
+        source: 'Local explainable demo',
+        rule: '错误处理优先使用 Result 类型而非 throw',
+        target: 'Project agent context managed block',
+        hit: 'Simulated locally because no user rule is active yet',
+      },
     },
   ];
 
   const userExamples = rules.slice(0, 4).map(r => ({
+    ruleId: r.id,
     task: 'Your captured rule',
     before: ['agent does the wrong thing', `✗ Violates "${r.content}"`],
     after:  ['agent follows the rule',     `✓ Honors "${r.content.slice(0, 32)}…"`],
     memory: r.content,
+    evidence: {
+      source: r.trigger_context || `Local scan${r.project_path ? ` from ${r.project_path}` : ''}`,
+      rule: r.content,
+      target: r.scope === 'global'
+        ? 'Global managed blocks for connected agents'
+        : `${r.project_path || 'Current project'} managed block`,
+      hit: 'Recorded as local rule_hit event when this demo is shown',
+    },
   }));
   const examples = userExamples.length > 0 ? userExamples : SEED_EXAMPLES;
   const [demoIndex, setDemoIndex] = useState(0);
   const demoExample = examples[demoIndex % examples.length];
+
+  useEffect(() => {
+    if (step !== 'demo' || !demoExample.ruleId || recordedHits.has(demoExample.ruleId)) return;
+    api.recordRuleHit(demoExample.ruleId, {
+      agent_name: 'welcome_demo',
+      project_path: rules.find(r => r.id === demoExample.ruleId)?.project_path,
+      target_path: demoExample.evidence.target,
+      details: 'Welcome Aha demo displayed an evidence-backed rule hit',
+    })
+      .then(() => setRecordedHits(prev => new Set(prev).add(demoExample.ruleId!)))
+      .catch(() => {});
+  }, [demoExample, recordedHits, rules, step]);
 
   if (loading) {
     return (
@@ -252,6 +311,20 @@ export default function Welcome() {
                 </Card.Content>
                 <div className="mt-3 text-xs text-purple-400">
                   ✓ Memory hit: "{demoExample.memory}"
+                </div>
+                <div className="mt-4 rounded-lg border border-gray-800 bg-gray-900/70 p-3 text-xs">
+                  <div className="mb-2 font-semibold text-gray-300">Evidence chain</div>
+                  {[
+                    ['Source', demoExample.evidence.source],
+                    ['Rule', demoExample.evidence.rule],
+                    ['Target', demoExample.evidence.target],
+                    ['Hit', demoExample.evidence.hit],
+                  ].map(([label, value]) => (
+                    <div key={label} className="grid grid-cols-[64px_1fr] gap-2 py-1 text-gray-500">
+                      <span>{label}</span>
+                      <span className="text-gray-300">{value}</span>
+                    </div>
+                  ))}
                 </div>
               </ShadowCard>
             </div>

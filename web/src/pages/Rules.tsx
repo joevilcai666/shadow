@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type Rule } from '../lib/api';
-import { Search, Trash2, CheckCircle, XCircle } from 'lucide-react';
+import { Search, Trash2, CheckCircle, XCircle, Globe2 } from 'lucide-react';
 import { Checkbox, Input } from '@heroui/react';
 import { IconButton, LoadingState, ShadowButton, ShadowCard, StatusChip, TagChip } from '../components/ui';
 import { useRealtimeRefresh } from '../lib/realtime';
@@ -47,6 +47,11 @@ export default function Rules() {
   const toggleStatus = async (rule: Rule) => {
     const newStatus = rule.status === 'active' ? 'disabled' : 'active';
     await api.updateRule(rule.id, { status: newStatus });
+    loadRules();
+  };
+
+  const promoteToGlobal = async (rule: Rule) => {
+    await api.updateRule(rule.id, { scope: 'global', project_path: '' });
     loadRules();
   };
 
@@ -132,9 +137,13 @@ export default function Rules() {
                       )}
                     </div>
                     <p className="text-sm leading-relaxed">{rule.content}</p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Why: {rule.confidence >= 0.8 ? 'high-confidence correction' : 'reviewed memory candidate'} · Source: {rule.trigger_context || rule.project_path || 'local memory store'}
+                    </p>
                     <div className="flex items-center gap-3 mt-2 text-xs text-gray-500">
                       <span>v{rule.version}</span>
                       <span>confidence: {(rule.confidence * 100).toFixed(0)}%</span>
+                      <span>{rule.scope === 'project' ? 'Project health: local' : 'Global health: broad impact'}</span>
                       {rule.tags?.map(tag => (
                         <TagChip key={tag}>{tag}</TagChip>
                       ))}
@@ -156,6 +165,15 @@ export default function Rules() {
                     >
                       <Trash2 size={16} />
                     </IconButton>
+                    {rule.scope === 'project' && (
+                      <IconButton
+                        onClick={() => promoteToGlobal(rule)}
+                        tone="subtle"
+                        label="Promote to global"
+                      >
+                        <Globe2 size={16} />
+                      </IconButton>
+                    )}
                   </div>
                 </div>
               </ShadowCard>

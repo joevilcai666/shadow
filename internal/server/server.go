@@ -25,12 +25,14 @@ var staticAssets embed.FS
 
 // Server is the HTTP API server for the Shadow web console.
 type Server struct {
-	ruleRepo    *storage.RuleRepo
-	sourceRepo  *storage.SourceRepo
-	versionRepo *storage.VersionRepo
-	configRepo  *storage.ConfigRepo
-	projectRepo *storage.ProjectRepo
-	configMgr   *config.Manager
+	ruleRepo      *storage.RuleRepo
+	sourceRepo    *storage.SourceRepo
+	eventRepo     *storage.EventRepo
+	versionRepo   *storage.VersionRepo
+	configRepo    *storage.ConfigRepo
+	projectRepo   *storage.ProjectRepo
+	userMemoryRepo *storage.UserMemoryRepo
+	configMgr     *config.Manager
 	router      *mux.Router
 	wsHub       *WebSocketHub
 	cfg         config.ServerConfig
@@ -55,24 +57,28 @@ func (s *Server) SetControlHooks(toggleCapture, syncAdapters func() error) {
 func New(
 	ruleRepo *storage.RuleRepo,
 	sourceRepo *storage.SourceRepo,
+	eventRepo *storage.EventRepo,
 	versionRepo *storage.VersionRepo,
 	configRepo *storage.ConfigRepo,
 	projectRepo *storage.ProjectRepo,
+	userMemoryRepo *storage.UserMemoryRepo,
 	configMgr *config.Manager,
 	cfg config.ServerConfig,
 	mcpServer *adapter.MCPServer,
 ) *Server {
 	s := &Server{
-		ruleRepo:    ruleRepo,
-		sourceRepo:  sourceRepo,
-		versionRepo: versionRepo,
-		configRepo:  configRepo,
-		projectRepo: projectRepo,
-		configMgr:   configMgr,
-		router:      mux.NewRouter(),
-		wsHub:       NewWebSocketHub(),
-		cfg:         cfg,
-		mcpServer:   mcpServer,
+		ruleRepo:       ruleRepo,
+		sourceRepo:     sourceRepo,
+		eventRepo:      eventRepo,
+		versionRepo:    versionRepo,
+		configRepo:     configRepo,
+		projectRepo:    projectRepo,
+		userMemoryRepo: userMemoryRepo,
+		configMgr:      configMgr,
+		router:         mux.NewRouter(),
+		wsHub:          NewWebSocketHub(),
+		cfg:            cfg,
+		mcpServer:      mcpServer,
 	}
 	s.routes()
 	return s
@@ -110,9 +116,16 @@ func (s *Server) routes() {
 	api.HandleFunc("/rules/{id}", s.updateRule).Methods("PUT")
 	api.HandleFunc("/rules/{id}", s.deleteRule).Methods("DELETE")
 	api.HandleFunc("/rules/{id}/timeline", s.getRuleTimeline).Methods("GET")
+	api.HandleFunc("/rules/{id}/events", s.getRuleEvents).Methods("GET")
 	api.HandleFunc("/rules/{id}/versions", s.getRuleVersions).Methods("GET")
 	api.HandleFunc("/rules/{id}/versions/{v}/rollback", s.rollbackRule).Methods("PUT")
+	api.HandleFunc("/rules/{id}/hit", s.recordRuleHit).Methods("POST")
 	api.HandleFunc("/rules/batch", s.batchRules).Methods("POST")
+
+	// User memories (cross-agent personal context — SHADOW-038)
+	api.HandleFunc("/memories", s.listMemories).Methods("GET")
+	api.HandleFunc("/memories", s.createMemory).Methods("POST")
+	api.HandleFunc("/memories/{id}", s.deleteMemory).Methods("DELETE")
 
 	// Projects
 	api.HandleFunc("/projects", s.listProjects).Methods("GET")
@@ -125,7 +138,9 @@ func (s *Server) routes() {
 	// Dashboard
 	api.HandleFunc("/dashboard", s.getDashboard).Methods("GET")
 	api.HandleFunc("/dashboard/map", s.getDashboardMap).Methods("GET")
+	api.HandleFunc("/conflicts", s.listConflicts).Methods("GET")
 	api.HandleFunc("/stats", s.getStats).Methods("GET")
+	api.HandleFunc("/stats/hit-rate", s.getHitRate).Methods("GET")
 
 	// Capture
 	api.HandleFunc("/capture/toggle", s.toggleCapture).Methods("POST")
@@ -338,6 +353,85 @@ func (s *Server) deleteRule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// MARK: - User memories (SHADOW-038 /store_memory)
+
+// validMemoryCategories is the allow-list for UserMemory.Category.
+var validMemoryCategories = map[string]bool{
+	"preference":  true,
+	"convention":  true,
+	"context":     true,
+}
+
+// createMemory stores a user-authored, cross-agent personal memory.
+// UserMemory has no status/decay (unlike Rule) — it is always-active context
+// the user explicitly chose to persist.
+func (s *Server) createMemory(w http.ResponseWriter, r *http.Request) {
+	var m storage.UserMemory
+	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(m.Content) == "" {
+		writeError(w, http.StatusBadRequest, "content is required")
+		return
+	}
+	if !validMemoryCategories[m.Category] {
+		writeError(w, http.StatusBadRequest,
+			"category must be one of: preference, convention, context")
+		return
+	}
+	// Single-user, local-first product — no auth. Default to "local" unless
+	// the caller (e.g. --user flag) supplies a different id.
+	if m.UserID == "" {
+		m.UserID = "local"
+	}
+	if m.Tags == nil {
+		m.Tags = []string{}
+	}
+	m.ID = storage.NewID()
+	m.CreatedAt = storage.Now()
+	m.UpdatedAt = storage.Now()
+
+	// Privacy check — same guard as createRule.
+	if found, pattern := s.configMgr.ContainsSensitiveData(m.Content); found {
+		writeError(w, http.StatusBadRequest, "memory contains sensitive data matching pattern: "+pattern)
+		return
+	}
+
+	if err := s.userMemoryRepo.Create(&m); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	s.wsHub.Broadcast(map[string]any{"event": "memory.created", "memory_id": m.ID})
+	writeJSON(w, http.StatusCreated, m)
+}
+
+// listMemories returns user memories, optionally filtered by ?user= and ?project=.
+func (s *Server) listMemories(w http.ResponseWriter, r *http.Request) {
+	user := r.URL.Query().Get("user")
+	project := r.URL.Query().Get("project")
+	memories, err := s.userMemoryRepo.List(user, project)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if memories == nil {
+		memories = []*storage.UserMemory{}
+	}
+	writeJSON(w, http.StatusOK, memories)
+}
+
+// deleteMemory removes a user memory by id.
+func (s *Server) deleteMemory(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	if err := s.userMemoryRepo.Delete(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
 func (s *Server) getRuleTimeline(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	sources, err := s.sourceRepo.ListByRuleID(id)
@@ -349,6 +443,19 @@ func (s *Server) getRuleTimeline(w http.ResponseWriter, r *http.Request) {
 		sources = []*storage.Source{}
 	}
 	writeJSON(w, http.StatusOK, sources)
+}
+
+func (s *Server) getRuleEvents(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	events, err := s.eventRepo.ListByRuleID(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if events == nil {
+		events = []*storage.Event{}
+	}
+	writeJSON(w, http.StatusOK, events)
 }
 
 func (s *Server) getRuleVersions(w http.ResponseWriter, r *http.Request) {
@@ -422,6 +529,63 @@ func (s *Server) batchRules(w http.ResponseWriter, r *http.Request) {
 		s.triggerAdapterSync()
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "batch complete"})
+}
+
+func (s *Server) recordRuleHit(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	rule, err := s.ruleRepo.GetByID(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if rule == nil {
+		writeError(w, http.StatusNotFound, "rule not found")
+		return
+	}
+
+	var req struct {
+		AgentName   string `json:"agent_name"`
+		ProjectPath string `json:"project_path"`
+		TargetPath  string `json:"target_path"`
+		Details     string `json:"details"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	if req.AgentName == "" {
+		req.AgentName = "unknown"
+	}
+	if req.ProjectPath == "" {
+		req.ProjectPath = rule.ProjectPath
+	}
+	if req.Details == "" {
+		req.Details = "rule surfaced via shadow task"
+	}
+
+	now := storage.Now()
+	event := &storage.Event{
+		ID:          storage.NewID(),
+		RuleID:      id,
+		EventType:   "rule_hit",
+		AgentName:   req.AgentName,
+		ProjectPath: req.ProjectPath,
+		TargetPath:  req.TargetPath,
+		Details:     req.Details,
+		Timestamp:   now,
+	}
+	if err := s.eventRepo.Create(event); err != nil {
+		writeError(w, http.StatusInternalServerError, "record hit: "+err.Error())
+		return
+	}
+	// A hit refreshes decay: the rule just proved useful, so restore it to
+	// near-full confidence (30-day half-life from now). (SHADOW-041)
+	decayScore := storage.ComputeDecayScore(rule.Confidence, now)
+	if err := s.ruleRepo.TouchHit(id, now, decayScore); err != nil {
+		// Non-fatal — the event was recorded; just log the decay refresh failure.
+		slog.Warn("refresh decay after hit", "rule_id", id, "err", err)
+	}
+	s.wsHub.Broadcast(map[string]any{"event": "rule.hit", "rule_id": id, "agent": event.AgentName})
+	writeJSON(w, http.StatusCreated, event)
 }
 
 func (s *Server) listProjects(w http.ResponseWriter, r *http.Request) {
@@ -534,6 +698,30 @@ func (s *Server) getDashboard(w http.ResponseWriter, r *http.Request) {
 		projectCount = len(projects)
 	}
 
+	hitCounts, _ := s.eventRepo.CountRuleHits()
+	totalHits := 0
+	for _, count := range hitCounts {
+		totalHits += count
+	}
+	agentCoverage, _ := s.eventRepo.CountRuleHitsByAgent()
+	adapterSync := map[string]any{}
+	for _, name := range []string{"claude_code", "cursor", "codex", "copilot"} {
+		if latest, err := s.eventRepo.LatestSyncByAgent(name); err == nil && latest != nil {
+			adapterSync[name] = latest
+		}
+	}
+	health := []map[string]string{}
+	if active == 0 {
+		health = append(health, map[string]string{
+			"level": "warning", "message": "No active rules yet; review candidates to complete the memory loop.",
+		})
+	}
+	if totalHits == 0 && active > 0 {
+		health = append(health, map[string]string{
+			"level": "info", "message": "Active rules have synced, but no hit events have been observed yet.",
+		})
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"total_rules":      total,
 		"active_rules":     active,
@@ -543,7 +731,82 @@ func (s *Server) getDashboard(w http.ResponseWriter, r *http.Request) {
 		"total_sources":    sourceCount,
 		"project_count":    projectCount,
 		"agent_stats":      agentStats,
+		"total_rule_hits":  totalHits,
+		"agent_coverage":   agentCoverage,
+		"adapter_sync":     adapterSync,
+		"health":           health,
+		"hit_rate":         s.computeHitRate(active),
 	})
+}
+
+// computeHitRate builds the hit-rate summary used by /api/stats/hit-rate and
+// embedded in the dashboard. activeRules is passed in to avoid a second count
+// query when the caller already has it. (SHADOW-041)
+//
+// hit_rate_pct = distinct active rules hit this week / total active rules.
+// This is a Type-A proxy (rules actually surfaced/used) for the PRD's
+// aspirational Type-C (user-perceived) metric, which is not directly measurable.
+func (s *Server) computeHitRate(activeRules int) map[string]any {
+	distinct7d, _ := s.eventRepo.DistinctHitRulesLastDays(7)
+	hitsThisWeek, _ := s.eventRepo.CountRuleHitsLastDays(7)
+	hitsLast14, _ := s.eventRepo.CountRuleHitsLastDays(14)
+	// last-week = hits in [7,14) days = (last 14) − (last 7).
+	hitsLastWeek := hitsLast14 - hitsThisWeek
+	if hitsLastWeek < 0 {
+		hitsLastWeek = 0
+	}
+
+	ratePct := 0
+	if activeRules > 0 {
+		ratePct = distinct7d * 100 / activeRules
+	}
+
+	trend := "equal"
+	switch {
+	case hitsThisWeek > hitsLastWeek:
+		trend = "up"
+	case hitsThisWeek < hitsLastWeek:
+		trend = "down"
+	}
+
+	// low-hit = active rules not surfaced at all in the last week.
+	lowHit := 0
+	if activeRules > 0 {
+		lowHit = activeRules - distinct7d
+		if lowHit < 0 {
+			lowHit = 0
+		}
+	}
+
+	lastHit := map[string]any(nil)
+	if latest, err := s.eventRepo.LatestRuleHit(); err == nil && latest != nil {
+		entry := map[string]any{
+			"rule_id":    latest.RuleID,
+			"agent_name": latest.AgentName,
+			"timestamp":  latest.Timestamp,
+		}
+		if rule, err := s.ruleRepo.GetByID(latest.RuleID); err == nil && rule != nil {
+			entry["content"] = rule.Content
+		}
+		lastHit = entry
+	}
+
+	return map[string]any{
+		"active_rules":            activeRules,
+		"distinct_hit_rules_7d":   distinct7d,
+		"hit_rate_pct":            ratePct,
+		"hits_this_week":          hitsThisWeek,
+		"hits_last_week":          hitsLastWeek,
+		"trend":                   trend,
+		"low_hit_count":           lowHit,
+		"last_hit":                lastHit,
+	}
+}
+
+// getHitRate returns the hit-rate summary (SHADOW-041).
+func (s *Server) getHitRate(w http.ResponseWriter, r *http.Request) {
+	active, _ := s.ruleRepo.Count(storage.RuleFilter{Status: "active"})
+	writeJSON(w, http.StatusOK, s.computeHitRate(active))
 }
 
 // getDashboardMap powers the Memory Map canvas (web/src/pages/MemoryMapPage).
@@ -568,9 +831,12 @@ func (s *Server) getDashboardMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	hitCounts, _ := s.eventRepo.CountRuleHits()
+
 	// Build nodes.
 	nodes := make([]map[string]any, 0, len(rules))
 	for _, rule := range rules {
+		sourceSnippet, agents := s.ruleEvidence(rule.ID)
 		nodes = append(nodes, map[string]any{
 			"id":              rule.ID,
 			"title":           firstLine(rule.Content, 40),
@@ -582,8 +848,9 @@ func (s *Server) getDashboardMap(w http.ResponseWriter, r *http.Request) {
 			"tags":            rule.Tags,
 			"trigger_context": rule.TriggerContext,
 			"project_path":    rule.ProjectPath,
-			"agents":          ruleAgents(rule.ProjectPath), // best-effort
-			"hit_count":       0,                            // filled later if you wire a counter
+			"agents":          agents,
+			"hit_count":       hitCounts[rule.ID],
+			"source_snippet":  sourceSnippet,
 			"created_at":      rule.CreatedAt,
 			"updated_at":      rule.UpdatedAt,
 		})
@@ -671,6 +938,50 @@ func (s *Server) getDashboardMap(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) listConflicts(w http.ResponseWriter, r *http.Request) {
+	rules, err := s.ruleRepo.List(storage.RuleFilter{Limit: 500})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, buildConflictPairs(rules))
+}
+
+func buildConflictPairs(rules []*storage.Rule) []map[string]any {
+	pairs := []map[string]any{}
+	for i := range rules {
+		if rules[i].Status != "conflicted" {
+			continue
+		}
+		bestJ, bestShared := -1, 0
+		for j := range rules {
+			if i == j {
+				continue
+			}
+			if rules[i].ProjectPath == "" || rules[i].ProjectPath != rules[j].ProjectPath {
+				continue
+			}
+			if shared := tagOverlap(rules[i].Tags, rules[j].Tags); shared > bestShared {
+				bestShared, bestJ = shared, j
+			}
+		}
+		if bestJ < 0 || bestShared == 0 {
+			continue
+		}
+		score := 0.7 + float64(bestShared)*0.1
+		if score > 1 {
+			score = 1
+		}
+		pairs = append(pairs, map[string]any{
+			"rule_a": rules[i],
+			"rule_b": rules[bestJ],
+			"score":  score,
+			"reason": "同项目共享 " + itoa(bestShared) + " 个标签，且其中一条规则处于 conflicted 状态",
+		})
+	}
+	return pairs
+}
+
 // classifyEdge maps a tag-overlap pair onto a sieve tier.
 //
 // Rule (逻辑是底线 — each branch is verifiable):
@@ -688,7 +999,7 @@ func classifyEdge(shared, tagsA, tagsB int, sameProject bool) (tier string, scor
 	if maxTags == 0 {
 		maxTags = 1
 	}
-	score = float64(shared)/float64(maxTags)
+	score = float64(shared) / float64(maxTags)
 	if sameProject {
 		score += 0.2
 	}
@@ -711,6 +1022,37 @@ func classifyEdge(shared, tagsA, tagsB int, sameProject bool) (tier string, scor
 }
 
 // --- dashboard/map helpers ---
+
+func (s *Server) ruleEvidence(ruleID string) (string, []string) {
+	agentSet := map[string]struct{}{}
+	sourceSnippet := ""
+	sources, err := s.sourceRepo.ListByRuleID(ruleID)
+	if err == nil {
+		for _, source := range sources {
+			if sourceSnippet == "" && source.RawSnippet != "" {
+				sourceSnippet = source.RawSnippet
+			}
+			if source.AgentName != "" {
+				agentSet[source.AgentName] = struct{}{}
+			}
+		}
+	}
+	eventAgents, err := s.eventRepo.AgentsForRule(ruleID)
+	if err == nil {
+		for _, agent := range eventAgents {
+			agentSet[agent] = struct{}{}
+		}
+	}
+
+	agents := make([]string, 0, len(agentSet))
+	for agent := range agentSet {
+		agents = append(agents, agent)
+	}
+	if len(agents) == 0 {
+		agents = ruleAgents("")
+	}
+	return sourceSnippet, agents
+}
 
 // mapCategory collapses our internal category vocabulary into the 3
 // frontend buckets. Unknown categories fall into 'practice'.
@@ -904,37 +1246,58 @@ func (s *Server) listAdapters(w http.ResponseWriter, r *http.Request) {
 	backupDir := home + "/.shadow/backups"
 
 	adapters := []map[string]any{
-		{
+		s.adapterStatus(map[string]any{
 			"name":        "claude_code",
 			"label":       "Claude Code",
 			"installed":   adapter.NewClaudeCodeAdapter(backupDir).IsInstalled(),
 			"enabled":     s.configMgr.Get().Adapters.ClaudeCode.Enabled,
 			"target_path": "CLAUDE.md (project) + ~/.claude/CLAUDE.md (global)",
-		},
-		{
+		}),
+		s.adapterStatus(map[string]any{
 			"name":        "cursor",
 			"label":       "Cursor",
 			"installed":   adapter.NewCursorAdapter(backupDir).IsInstalled(),
 			"enabled":     s.configMgr.Get().Adapters.Cursor.Enabled,
 			"target_path": ".cursorrules (project) + ~/.cursorrules (global)",
-		},
-		{
+		}),
+		s.adapterStatus(map[string]any{
 			"name":        "codex",
 			"label":       "Codex",
 			"installed":   adapter.NewCodexAdapter(backupDir).IsInstalled(),
 			"enabled":     s.configMgr.Get().Adapters.Codex.Enabled,
 			"target_path": "AGENTS.md (project) + ~/AGENTS.md (global)",
-		},
-		{
+		}),
+		s.adapterStatus(map[string]any{
 			"name":        "copilot",
 			"label":       "GitHub Copilot",
 			"installed":   adapter.NewCopilotAdapter(backupDir).IsInstalled(),
 			"enabled":     s.configMgr.Get().Adapters.Copilot.Enabled,
 			"target_path": ".github/copilot-instructions.md (project) + ~/.copilot/instructions.md (global)",
-		},
+		}),
 	}
 
 	writeJSON(w, http.StatusOK, adapters)
+}
+
+func (s *Server) adapterStatus(base map[string]any) map[string]any {
+	name, _ := base["name"].(string)
+	base["last_sync_at"] = ""
+	base["last_error"] = ""
+	base["hit_count"] = 0
+	base["managed_block_status"] = "unknown"
+
+	if count, err := s.eventRepo.CountRuleHitsByAgentName(name); err == nil {
+		base["hit_count"] = count
+	}
+	if latest, err := s.eventRepo.LatestSyncByAgent(name); err == nil && latest != nil {
+		base["last_sync_at"] = latest.Timestamp
+		base["managed_block_status"] = "synced"
+		if latest.EventType == "sync_failure" {
+			base["last_error"] = latest.Details
+			base["managed_block_status"] = "error"
+		}
+	}
+	return base
 }
 
 func (s *Server) toggleAdapter(w http.ResponseWriter, r *http.Request) {

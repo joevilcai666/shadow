@@ -47,9 +47,11 @@ func testEnvWithDir(t *testing.T) (*Server, *sql.DB, string) {
 	s := New(
 		storage.NewRuleRepo(db),
 		storage.NewSourceRepo(db),
+		storage.NewEventRepo(db),
 		storage.NewVersionRepo(db),
 		storage.NewConfigRepo(db),
 		storage.NewProjectRepo(db),
+		storage.NewUserMemoryRepo(db),
 		cfgMgr,
 		config.ServerConfig{Port: 7878, Bind: "127.0.0.1"},
 		adapter.NewMCPServer(storage.NewRuleRepo(db)),
@@ -272,6 +274,60 @@ func TestDashboard(t *testing.T) {
 	}
 }
 
+func TestDashboardIncludesEffectivenessMetrics(t *testing.T) {
+	s, db := testEnv(t)
+	ruleRepo := storage.NewRuleRepo(db)
+	eventRepo := storage.NewEventRepo(db)
+
+	rule := &storage.Rule{
+		ID: storage.NewID(), Content: "Use pnpm not npm", Scope: "global",
+		Tags: []string{"toolchain"}, Status: "active", Version: 1,
+		CreatedAt: storage.Now(), UpdatedAt: storage.Now(),
+	}
+	if err := ruleRepo.Create(rule); err != nil {
+		t.Fatalf("seed rule: %v", err)
+	}
+	for _, event := range []*storage.Event{
+		{
+			ID: storage.NewID(), RuleID: rule.ID, EventType: "rule_hit",
+			AgentName: "codex", ProjectPath: "/tmp/app", TargetPath: "AGENTS.md",
+			Details: "Aha demo memory hit", Timestamp: storage.Now(),
+		},
+		{
+			ID: storage.NewID(), EventType: "sync_success",
+			AgentName: "codex", ProjectPath: "/tmp/app", TargetPath: "AGENTS.md",
+			Details: "wrote 1 active rule", Timestamp: storage.Now(),
+		},
+	} {
+		if err := eventRepo.Create(event); err != nil {
+			t.Fatalf("seed event: %v", err)
+		}
+	}
+
+	req := newLocalRequest("GET", "/api/dashboard", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("dashboard status: %d", w.Code)
+	}
+
+	var data map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&data); err != nil {
+		t.Fatalf("decode dashboard: %v", err)
+	}
+	if data["total_rule_hits"].(float64) != 1 {
+		t.Fatalf("total_rule_hits = %v, want 1", data["total_rule_hits"])
+	}
+	coverage := data["agent_coverage"].(map[string]any)
+	if coverage["codex"].(float64) != 1 {
+		t.Fatalf("codex coverage = %v, want 1", coverage["codex"])
+	}
+	sync := data["adapter_sync"].(map[string]any)
+	if _, ok := sync["codex"]; !ok {
+		t.Fatalf("adapter_sync = %#v, want codex latest sync", sync)
+	}
+}
+
 func TestCreateProject(t *testing.T) {
 	s, _ := testEnv(t)
 
@@ -468,6 +524,62 @@ func TestDashboardMapEmpty(t *testing.T) {
 	}
 }
 
+func TestDashboardMapIncludesRuleHitCountAndSourceSnippet(t *testing.T) {
+	s, db := testEnv(t)
+	ruleRepo := storage.NewRuleRepo(db)
+	sourceRepo := storage.NewSourceRepo(db)
+	eventRepo := storage.NewEventRepo(db)
+
+	rule := &storage.Rule{
+		ID: storage.NewID(), Content: "Use pnpm not npm", Scope: "project", ProjectPath: "/tmp/app",
+		Tags: []string{"toolchain"}, Status: "active", Version: 1,
+		CreatedAt: storage.Now(), UpdatedAt: storage.Now(),
+	}
+	if err := ruleRepo.Create(rule); err != nil {
+		t.Fatalf("seed rule: %v", err)
+	}
+	if err := sourceRepo.Create(&storage.Source{
+		ID: storage.NewID(), RuleID: rule.ID, SignalType: "manual_edit",
+		SignalStrength: "strong", AgentName: "codex", ProjectPath: "/tmp/app",
+		RawSnippet: "Don't use npm, use pnpm", Timestamp: storage.Now(),
+	}); err != nil {
+		t.Fatalf("seed source: %v", err)
+	}
+	if err := eventRepo.Create(&storage.Event{
+		ID: storage.NewID(), RuleID: rule.ID, EventType: "rule_hit",
+		AgentName: "codex", ProjectPath: "/tmp/app", TargetPath: "AGENTS.md",
+		Details: "rule matched prompt", Timestamp: storage.Now(),
+	}); err != nil {
+		t.Fatalf("seed event: %v", err)
+	}
+
+	req := newLocalRequest("GET", "/api/dashboard/map", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("map status: %d", w.Code)
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode map: %v", err)
+	}
+	nodes := resp["nodes"].([]any)
+	if len(nodes) != 1 {
+		t.Fatalf("nodes = %d, want 1", len(nodes))
+	}
+	node := nodes[0].(map[string]any)
+	if node["hit_count"].(float64) != 1 {
+		t.Fatalf("hit_count = %v, want 1", node["hit_count"])
+	}
+	if node["source_snippet"] != "Don't use npm, use pnpm" {
+		t.Fatalf("source_snippet = %v", node["source_snippet"])
+	}
+	agents := node["agents"].([]any)
+	if len(agents) != 1 || agents[0] != "codex" {
+		t.Fatalf("agents = %#v, want codex from source/hit evidence", agents)
+	}
+}
+
 func TestDashboardMapEdgesFromTagOverlap(t *testing.T) {
 	s, _ := testEnv(t)
 
@@ -617,6 +729,49 @@ func TestDashboardMapSieveTiers(t *testing.T) {
 	}
 }
 
+func TestConflictPairsEndpointReturnsRealRelation(t *testing.T) {
+	s, db := testEnv(t)
+	ruleRepo := storage.NewRuleRepo(db)
+	active := &storage.Rule{
+		ID: storage.NewID(), Content: "Use pnpm", Scope: "project", ProjectPath: "/proj/x",
+		Tags: []string{"toolchain", "pnpm"}, Status: "active", Version: 1,
+		CreatedAt: storage.Now(), UpdatedAt: storage.Now(),
+	}
+	conflicted := &storage.Rule{
+		ID: storage.NewID(), Content: "Use npm", Scope: "project", ProjectPath: "/proj/x",
+		Tags: []string{"toolchain", "pnpm"}, Status: "conflicted", Version: 1,
+		CreatedAt: storage.Now(), UpdatedAt: storage.Now(),
+	}
+	for _, rule := range []*storage.Rule{active, conflicted} {
+		if err := ruleRepo.Create(rule); err != nil {
+			t.Fatalf("seed rule: %v", err)
+		}
+	}
+
+	req := newLocalRequest("GET", "/api/conflicts", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("conflicts status: %d, body: %s", w.Code, w.Body.String())
+	}
+	var pairs []map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&pairs); err != nil {
+		t.Fatalf("decode conflicts: %v", err)
+	}
+	if len(pairs) != 1 {
+		t.Fatalf("pairs = %d, want 1", len(pairs))
+	}
+	if pairs[0]["reason"] == "" {
+		t.Fatalf("pair missing reason: %#v", pairs[0])
+	}
+	if pairs[0]["rule_a"].(map[string]any)["id"] != conflicted.ID {
+		t.Fatalf("rule_a should be the conflicted rule: %#v", pairs[0]["rule_a"])
+	}
+	if pairs[0]["rule_b"].(map[string]any)["id"] != active.ID {
+		t.Fatalf("rule_b should be the matching active rule: %#v", pairs[0]["rule_b"])
+	}
+}
+
 func TestWebSocketBroadcastDelivers(t *testing.T) {
 	hub := NewWebSocketHub()
 	go hub.Run(context.Background())
@@ -670,4 +825,149 @@ func TestWebSocketBroadcastDropsSlowClient(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Error("slow client should have been unregistered after a dropped broadcast")
+}
+
+// MARK: - User memories (SHADOW-038)
+
+func TestCreateAndListMemories(t *testing.T) {
+	s, _ := testEnv(t)
+
+	// Create a valid memory.
+	payload, _ := json.Marshal(map[string]any{
+		"content":  "I prefer Conventional Commits",
+		"category": "convention",
+		"tags":     []string{"git"},
+	})
+	req := newLocalRequest("POST", "/api/memories", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create status: got %d, want %d. body: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+	var created storage.UserMemory
+	json.NewDecoder(w.Body).Decode(&created)
+	if created.ID == "" || created.UserID != "local" {
+		t.Errorf("created = %#v, want id set and user_id=local", created)
+	}
+
+	// List returns it.
+	req = newLocalRequest("GET", "/api/memories", nil)
+	w = httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list status: %d", w.Code)
+	}
+	var list []*storage.UserMemory
+	json.NewDecoder(w.Body).Decode(&list)
+	if len(list) != 1 || list[0].ID != created.ID {
+		t.Errorf("list = %#v, want 1 memory with id %s", list, created.ID)
+	}
+
+	// Delete it.
+	req = newLocalRequest("DELETE", "/api/memories/"+created.ID, nil)
+	w = httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete status: %d", w.Code)
+	}
+}
+
+func TestCreateMemoryRejectsBadCategory(t *testing.T) {
+	s, _ := testEnv(t)
+	payload, _ := json.Marshal(map[string]any{
+		"content":  "x",
+		"category": "nonsense",
+	})
+	req := newLocalRequest("POST", "/api/memories", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want 400 for bad category. body: %s", w.Code, w.Body.String())
+	}
+}
+
+// MARK: - Hit rate (SHADOW-041)
+
+func TestRecordRuleHitRefreshesDecay(t *testing.T) {
+	s, db := testEnv(t)
+	ruleRepo := storage.NewRuleRepo(db)
+
+	rule := &storage.Rule{
+		ID: storage.NewID(), Content: "Use pnpm", Scope: "global",
+		Confidence: 0.9, Status: "active", Version: 1,
+		CreatedAt: storage.Now(), UpdatedAt: storage.Now(),
+	}
+	if err := ruleRepo.Create(rule); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-condition: no last hit.
+	before, _ := ruleRepo.GetByID(rule.ID)
+	if before.LastHitAt != "" {
+		t.Fatalf("pre-hit last_hit_at = %q, want empty", before.LastHitAt)
+	}
+
+	body, _ := json.Marshal(map[string]any{"agent_name": "claude-code"})
+	req := newLocalRequest("POST", "/api/rules/"+rule.ID+"/hit", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("hit status: %d body: %s", w.Code, w.Body.String())
+	}
+
+	after, _ := ruleRepo.GetByID(rule.ID)
+	if after.LastHitAt == "" {
+		t.Error("post-hit last_hit_at empty; recordRuleHit should refresh it")
+	}
+	if after.DecayScore < rule.Confidence*0.99 {
+		t.Errorf("post-hit decay_score = %f, want ~%f (hit restores confidence)", after.DecayScore, rule.Confidence)
+	}
+}
+
+func TestGetHitRate(t *testing.T) {
+	s, db := testEnv(t)
+	ruleRepo := storage.NewRuleRepo(db)
+	eventRepo := storage.NewEventRepo(db)
+
+	// Empty state: 0 active rules → rate 0.
+	req := newLocalRequest("GET", "/api/stats/hit-rate", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: %d", w.Code)
+	}
+	var empty map[string]any
+	json.NewDecoder(w.Body).Decode(&empty)
+	if empty["hit_rate_pct"].(float64) != 0 {
+		t.Errorf("empty rate = %v, want 0", empty["hit_rate_pct"])
+	}
+
+	// Two active rules; hit one of them this week.
+	r1 := &storage.Rule{ID: storage.NewID(), Content: "r1", Scope: "global", Status: "active", Version: 1, CreatedAt: storage.Now(), UpdatedAt: storage.Now()}
+	r2 := &storage.Rule{ID: storage.NewID(), Content: "r2", Scope: "global", Status: "active", Version: 1, CreatedAt: storage.Now(), UpdatedAt: storage.Now()}
+	ruleRepo.Create(r1)
+	ruleRepo.Create(r2)
+	eventRepo.Create(&storage.Event{ID: storage.NewID(), RuleID: r1.ID, EventType: "rule_hit", AgentName: "claude-code", Timestamp: storage.Now()})
+
+	req = newLocalRequest("GET", "/api/stats/hit-rate", nil)
+	w = httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	var hr map[string]any
+	json.NewDecoder(w.Body).Decode(&hr)
+	// 1 distinct hit / 2 active = 50%.
+	if hr["hit_rate_pct"].(float64) != 50 {
+		t.Errorf("hit_rate_pct = %v, want 50", hr["hit_rate_pct"])
+	}
+	if hr["distinct_hit_rules_7d"].(float64) != 1 {
+		t.Errorf("distinct_7d = %v, want 1", hr["distinct_hit_rules_7d"])
+	}
+	if hr["low_hit_count"].(float64) != 1 {
+		t.Errorf("low_hit_count = %v, want 1 (r2 unhit)", hr["low_hit_count"])
+	}
+	last, _ := hr["last_hit"].(map[string]any)
+	if last == nil || last["content"] != "r1" {
+		t.Errorf("last_hit = %#v, want content r1", last)
+	}
 }

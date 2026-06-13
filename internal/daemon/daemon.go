@@ -132,9 +132,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 	httpSrv := apiserver.New(
 		ruleRepo,
 		storage.NewSourceRepo(db),
+		storage.NewEventRepo(db),
 		storage.NewVersionRepo(db),
 		storage.NewConfigRepo(db),
 		storage.NewProjectRepo(db),
+		storage.NewUserMemoryRepo(db),
 		cfgMgr,
 		config.ServerConfig{Port: 7878, Bind: "127.0.0.1"},
 		mcpServer,
@@ -518,6 +520,7 @@ func (d *Daemon) syncAdapters() {
 	}
 
 	ruleRepo := storage.NewRuleRepo(d.db)
+	eventRepo := storage.NewEventRepo(d.db)
 
 	// Get all active rules.
 	globalRules, err := ruleRepo.List(storage.RuleFilter{Status: "active", Scope: "global"})
@@ -559,8 +562,10 @@ func (d *Daemon) syncAdapters() {
 		if len(globalRules) > 0 {
 			if err := a.WriteRules(globalRules, "global", ""); err != nil {
 				slog.Warn("adapter sync: write global rules", "adapter", a.Name(), "error", err)
+				d.recordSyncEvent(eventRepo, a, "global", "", "sync_failure", err.Error())
 			} else {
 				slog.Debug("adapter sync: wrote global rules", "adapter", a.Name(), "count", len(globalRules))
+				d.recordSyncEvent(eventRepo, a, "global", "", "sync_success", fmt.Sprintf("wrote %d active global rule(s)", len(globalRules)))
 			}
 		}
 
@@ -577,6 +582,9 @@ func (d *Daemon) syncAdapters() {
 			if len(projectRules) > 0 {
 				if err := a.WriteRules(projectRules, "project", p.Path); err != nil {
 					slog.Warn("adapter sync: write project rules", "adapter", a.Name(), "project", p.Name, "error", err)
+					d.recordSyncEvent(eventRepo, a, "project", p.Path, "sync_failure", err.Error())
+				} else {
+					d.recordSyncEvent(eventRepo, a, "project", p.Path, "sync_success", fmt.Sprintf("wrote %d active project rule(s)", len(projectRules)))
 				}
 			}
 		}
@@ -593,11 +601,34 @@ func (d *Daemon) syncAdapters() {
 func (d *Daemon) removeAdapterBlocks(a adapter.Adapter, projects []*storage.Project) {
 	if err := a.RemoveRules("global", ""); err != nil {
 		slog.Warn("adapter sync: remove global rules", "adapter", a.Name(), "error", err)
+		d.recordSyncEvent(storage.NewEventRepo(d.db), a, "global", "", "sync_failure", err.Error())
+	} else {
+		d.recordSyncEvent(storage.NewEventRepo(d.db), a, "global", "", "sync_success", "removed managed block for disabled adapter")
 	}
 	for _, p := range projects {
 		if err := a.RemoveRules("project", p.Path); err != nil {
 			slog.Warn("adapter sync: remove project rules", "adapter", a.Name(), "project", p.Name, "error", err)
+			d.recordSyncEvent(storage.NewEventRepo(d.db), a, "project", p.Path, "sync_failure", err.Error())
+		} else {
+			d.recordSyncEvent(storage.NewEventRepo(d.db), a, "project", p.Path, "sync_success", "removed managed block for disabled adapter")
 		}
+	}
+}
+
+func (d *Daemon) recordSyncEvent(eventRepo *storage.EventRepo, a adapter.Adapter, scope, projectPath, eventType, details string) {
+	if eventRepo == nil || d.db == nil {
+		return
+	}
+	if err := eventRepo.Create(&storage.Event{
+		ID:          storage.NewID(),
+		EventType:   eventType,
+		AgentName:   a.Name(),
+		ProjectPath: projectPath,
+		TargetPath:  a.TargetPath(scope, projectPath),
+		Details:     details,
+		Timestamp:   storage.Now(),
+	}); err != nil {
+		slog.Warn("adapter sync: record event", "adapter", a.Name(), "error", err)
 	}
 }
 
