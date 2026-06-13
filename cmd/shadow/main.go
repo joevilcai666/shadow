@@ -1153,6 +1153,11 @@ Examples:
 			return fmt.Errorf("invalid --category %q: must be preference, convention, or context", category)
 		}
 		scope, _ := cmd.Flags().GetString("scope")
+		switch scope {
+		case "global", "project":
+		default:
+			return fmt.Errorf("invalid --scope %q: must be global or project", scope)
+		}
 		userID, _ := cmd.Flags().GetString("user")
 		if userID == "" {
 			userID = "local"

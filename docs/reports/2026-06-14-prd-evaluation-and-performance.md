@@ -68,6 +68,8 @@ and the dashboard hit-rate summary.
   sensitive memory content is rejected before persistence.
 - User-memory create/delete now triggers adapter sync so always-active personal
   context is written to native agent files immediately after changes.
+- `shadow store-memory` now rejects invalid `--scope` values locally, preventing
+  accidental global memories when a user mistypes the project/global switch.
 
 ## Performance Changes In This Pass
 

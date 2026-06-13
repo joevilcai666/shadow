@@ -67,6 +67,24 @@ func TestRunSyncDryRunReportsChangesWithoutWritingFiles(t *testing.T) {
 	}
 }
 
+func TestStoreMemoryRejectsInvalidScope(t *testing.T) {
+	cmd := storeMemoryCmd
+	if err := cmd.Flags().Set("scope", "workspace"); err != nil {
+		t.Fatalf("set scope: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Flags().Set("scope", "global")
+	})
+
+	err := cmd.RunE(cmd, []string{"remember this"})
+	if err == nil {
+		t.Fatal("RunE returned nil, want invalid scope error")
+	}
+	if !strings.Contains(err.Error(), "invalid --scope") {
+		t.Fatalf("error = %q, want invalid --scope", err.Error())
+	}
+}
+
 func TestRunSyncWritesOnlyRegisteredProjectAgents(t *testing.T) {
 	dir := t.TempDir()
 	home := filepath.Join(dir, "home")
