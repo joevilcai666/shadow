@@ -136,7 +136,9 @@ func TestCleanContent(t *testing.T) {
 		want   string
 	}{
 		{"不对，应该用 pnpm", "应该用 pnpm"},
-		{"Don't use npm", "use npm"},
+		{"Don't use npm", "Do not use npm"},
+		{"Don't use npm, use pnpm instead", "Use pnpm instead of npm"},
+		{"Stop using Jest", "Do not use Jest"},
 		{"Always write tests", "Always write tests"},
 	}
 

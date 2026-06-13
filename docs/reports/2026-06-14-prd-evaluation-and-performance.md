@@ -79,6 +79,9 @@ and the dashboard hit-rate summary.
   active rules.
 - Added an empty-candidate onboarding path into the seeded Aha demo so first-run
   users can still see the "agent remembered" moment before entering the console.
+- Fixed rule distillation cleanup for English negation corrections so inputs
+  like "Don't use npm, use pnpm instead" preserve the intended rule instead of
+  inverting it.
 
 ## Performance Changes In This Pass
 

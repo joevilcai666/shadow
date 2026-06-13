@@ -353,7 +353,10 @@ func categorize(content string) string {
 func cleanContent(s string) string {
 	// Remove common prefixes that aren't part of the rule itself.
 	s = strings.TrimSpace(s)
-	prefixes := []string{"不对，", "别这么写，", "记住：", "以后都要", "Don't ", "Stop "}
+	if normalized, ok := cleanEnglishNegation(s); ok {
+		return normalized
+	}
+	prefixes := []string{"不对，", "别这么写，", "记住：", "以后都要"}
 	for _, p := range prefixes {
 		if strings.HasPrefix(s, p) {
 			s = strings.TrimPrefix(s, p)
@@ -361,6 +364,48 @@ func cleanContent(s string) string {
 		}
 	}
 	return strings.TrimSpace(s)
+}
+
+func cleanEnglishNegation(s string) (string, bool) {
+	lower := strings.ToLower(s)
+	for _, prefix := range []string{"don't use ", "do not use ", "stop using "} {
+		if !strings.HasPrefix(lower, prefix) {
+			continue
+		}
+		rest := strings.TrimSpace(s[len(prefix):])
+		if rest == "" {
+			return "", false
+		}
+		if replacement, banned, ok := parseUseInstead(rest); ok {
+			return fmt.Sprintf("Use %s instead of %s", replacement, banned), true
+		}
+		return "Do not use " + rest, true
+	}
+	return "", false
+}
+
+func parseUseInstead(rest string) (replacement, banned string, ok bool) {
+	normalized := strings.NewReplacer(";", ",").Replace(rest)
+	parts := strings.SplitN(normalized, ",", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	banned = strings.TrimSpace(parts[0])
+	advice := strings.TrimSpace(parts[1])
+	adviceLower := strings.ToLower(advice)
+	for _, prefix := range []string{"use ", "switch to ", "prefer "} {
+		if strings.HasPrefix(adviceLower, prefix) {
+			replacement = strings.TrimSpace(advice[len(prefix):])
+			break
+		}
+	}
+	if replacement == "" {
+		return "", "", false
+	}
+	if strings.HasSuffix(strings.ToLower(replacement), " instead") {
+		replacement = strings.TrimSpace(replacement[:len(replacement)-len(" instead")])
+	}
+	return replacement, banned, replacement != "" && banned != ""
 }
 
 func wordSet(s string) map[string]bool {
