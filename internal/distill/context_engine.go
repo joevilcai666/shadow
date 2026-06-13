@@ -58,9 +58,9 @@ func (e *ContextEngine) Extract(req TaskContextRequest) (*ExtractedContext, erro
 
 	var scored []scoredRule
 	for _, r := range allRules {
-		s := e.scoreRule(r, req)
+		s, tagHit, projectHit := e.scoreRule(r, req)
 		if s > 0 {
-			scored = append(scored, scoredRule{rule: r, score: s})
+			scored = append(scored, scoredRule{rule: r, score: s, tagHit: tagHit, projectHit: projectHit})
 		}
 	}
 
@@ -90,18 +90,16 @@ func (e *ContextEngine) Extract(req TaskContextRequest) (*ExtractedContext, erro
 	return result, nil
 }
 
-// scoreRule returns a relevance score (0 = not relevant).
-// Higher = more relevant. Based on:
+// scoreRule returns a relevance score (0 = not relevant) plus the dimensions
+// that hit, so callers can surface match metadata. Higher score = more relevant.
+// Based on:
 //   - Tag exact match: +0.5
 //   - Same project: +0.3
 //   - Recency (30-day half-life): decay_score factor
 //   - Confidence: base confidence
-func (e *ContextEngine) scoreRule(r *storage.Rule, req TaskContextRequest) float64 {
-	var score float64
-
+func (e *ContextEngine) scoreRule(r *storage.Rule, req TaskContextRequest) (score float64, tagHit bool, projectHit bool) {
 	// Tag exact match check.
 	if len(req.Tags) > 0 {
-		tagHit := false
 		for _, wantTag := range req.Tags {
 			for _, ruleTag := range r.Tags {
 				if strings.EqualFold(wantTag, ruleTag) {
@@ -126,14 +124,15 @@ func (e *ContextEngine) scoreRule(r *storage.Rule, req TaskContextRequest) float
 			strings.HasPrefix(r.ProjectPath, req.ProjectPath) ||
 			strings.EqualFold(r.ProjectPath, req.ProjectPath) {
 			score += 0.3
+			projectHit = true
 		} else {
-			return 0 // project rule but different project
+			return 0, false, false // project rule but different project
 		}
 	}
 
 	// If no tag hit and scope doesn't match, skip.
 	if score == 0 && r.Scope != "global" {
-		return 0
+		return 0, false, false
 	}
 
 	// Recency factor: use decay_score (already computed) or fall back to confidence.
@@ -151,22 +150,11 @@ func (e *ContextEngine) scoreRule(r *storage.Rule, req TaskContextRequest) float
 	// Final score: confidence * importance * recency_factor.
 	// Add small tag bonus on top.
 	finalScore := recencyFactor * importance * 2.0
-	if _, hasTag := e.hasRequestedTag(r, req.Tags); hasTag {
+	if tagHit {
 		finalScore += 0.1
 	}
 
-	return finalScore
-}
-
-func (e *ContextEngine) hasRequestedTag(r *storage.Rule, wantTags []string) (string, bool) {
-	for _, want := range wantTags {
-		for _, got := range r.Tags {
-			if strings.EqualFold(want, got) {
-				return want, true
-			}
-		}
-	}
-	return "", false
+	return finalScore, tagHit, projectHit
 }
 
 // ExtractTagsFromText extracts potential tags from free-text task description.
