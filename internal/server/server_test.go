@@ -1031,6 +1031,29 @@ func TestCreateMemoryRejectsBadCategory(t *testing.T) {
 	}
 }
 
+func TestCreateMemoryRejectsSensitiveData(t *testing.T) {
+	s, db := testEnv(t)
+	payload, _ := json.Marshal(map[string]any{
+		"content":  "Use API key sk-abc123def456ghi789jkl012mno345pqr for test runs",
+		"category": "context",
+	})
+	req := newLocalRequest("POST", "/api/memories", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want 400 for sensitive memory. body: %s", w.Code, w.Body.String())
+	}
+
+	memories, err := storage.NewUserMemoryRepo(db).List("", "")
+	if err != nil {
+		t.Fatalf("list memories: %v", err)
+	}
+	if len(memories) != 0 {
+		t.Fatalf("memories persisted = %d, want 0", len(memories))
+	}
+}
+
 // MARK: - Hit rate (SHADOW-041)
 
 func TestRecordRuleHitRefreshesDecay(t *testing.T) {

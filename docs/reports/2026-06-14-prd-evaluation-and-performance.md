@@ -64,6 +64,8 @@ and the dashboard hit-rate summary.
 - Synced user memories into agent context files as always-active local context,
   so `shadow store-memory` now matches its "shared across all agents" promise
   instead of only storing/exporting the memory.
+- Added regression coverage for user-memory privacy rejection, verifying that
+  sensitive memory content is rejected before persistence.
 
 ## Performance Changes In This Pass
 
