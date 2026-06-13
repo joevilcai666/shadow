@@ -91,6 +91,10 @@ and the dashboard hit-rate summary.
   instead of creating duplicate candidate memories, preserving the Shadow_qt
   "one shared rule across agents" behavior while retaining linked source
   evidence.
+- `shadow uninstall --clean-blocks` now de-duplicates discovered project
+  context directories and scans them once before adapter cleanup, avoiding
+  repeated removal attempts when the current directory is also under a common
+  development root.
 
 ## Performance Changes In This Pass
 
@@ -121,6 +125,7 @@ Run after this pass:
 - `npm run lint` from `web`
 - `go test ./internal/server -run TestLocalhostOnlyAcceptsLoopbackHostsWithoutPorts -count=1`
 - `go test ./internal/distill -run TestProcessExplicitSignalMergesSimilarExistingCandidate -count=1`
+- `go test ./cmd/shadow -run TestFindProjectContextsDeduplicatesCurrentDirectory -count=1`
 - Browser smoke against `http://127.0.0.1:7878/`: dashboard rendered
   Shadow console content and browser error logs were empty.
 

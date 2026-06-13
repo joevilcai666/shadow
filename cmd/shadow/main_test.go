@@ -94,6 +94,26 @@ func TestFormatEffectivenessSummaryIncludesRepeatProxy(t *testing.T) {
 	}
 }
 
+func TestFindProjectContextsDeduplicatesCurrentDirectory(t *testing.T) {
+	home := t.TempDir()
+	project := filepath.Join(home, "Code", "shadow")
+	if err := os.MkdirAll(project, 0755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "AGENTS.md"), []byte("manual\n"), 0644); err != nil {
+		t.Fatalf("write context: %v", err)
+	}
+	t.Chdir(project)
+
+	dirs := findProjectContexts(home)
+	if len(dirs) != 1 {
+		t.Fatalf("dirs = %#v, want one unique project dir", dirs)
+	}
+	if dirs[0] != project {
+		t.Fatalf("dir = %q, want %q", dirs[0], project)
+	}
+}
+
 func TestRunSyncWritesOnlyRegisteredProjectAgents(t *testing.T) {
 	dir := t.TempDir()
 	home := filepath.Join(dir, "home")

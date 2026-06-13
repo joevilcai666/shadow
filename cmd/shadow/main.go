@@ -685,6 +685,7 @@ var uninstallCmd = &cobra.Command{
 			}
 
 			removed := 0
+			projectDirs := findProjectContexts(home)
 			for _, a := range adapters {
 				// Remove global managed blocks.
 				if err := a.RemoveRules("global", ""); err != nil {
@@ -695,8 +696,6 @@ var uninstallCmd = &cobra.Command{
 				}
 
 				// Remove project-level managed blocks from common locations.
-				// Walk home directory for project contexts.
-				projectDirs := findProjectContexts(home)
 				for _, dir := range projectDirs {
 					if err := a.RemoveRules("project", dir); err != nil {
 						// Not an error if file doesn't exist
@@ -721,6 +720,7 @@ var uninstallCmd = &cobra.Command{
 // findProjectContexts finds directories that likely contain agent context files.
 func findProjectContexts(home string) []string {
 	var dirs []string
+	seen := map[string]struct{}{}
 	// Check common development locations.
 	checkDirs := []string{
 		filepath.Join(home, "Developer"),
@@ -742,7 +742,7 @@ func findProjectContexts(home string) []string {
 		// Check if this dir itself has context files.
 		for _, f := range contextFiles {
 			if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
-				dirs = append(dirs, dir)
+				dirs = appendUniqueDir(dirs, seen, dir)
 				break
 			}
 		}
@@ -759,7 +759,7 @@ func findProjectContexts(home string) []string {
 			subDir := filepath.Join(dir, entry.Name())
 			for _, f := range contextFiles {
 				if _, err := os.Stat(filepath.Join(subDir, f)); err == nil {
-					dirs = append(dirs, subDir)
+					dirs = appendUniqueDir(dirs, seen, subDir)
 					break
 				}
 			}
@@ -767,6 +767,19 @@ func findProjectContexts(home string) []string {
 	}
 
 	return dirs
+}
+
+func appendUniqueDir(dirs []string, seen map[string]struct{}, dir string) []string {
+	key, err := filepath.Abs(dir)
+	if err != nil {
+		key = dir
+	}
+	key = filepath.Clean(key)
+	if _, ok := seen[key]; ok {
+		return dirs
+	}
+	seen[key] = struct{}{}
+	return append(dirs, dir)
 }
 
 var openCmd = &cobra.Command{
