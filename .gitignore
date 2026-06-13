@@ -41,6 +41,16 @@ go.work
 # Local handoff document for coding agents (not committed)
 HANDOFF.md
 
+# Agent instruction files (contain local paths & personal data)
+CLAUDE.md
+AGENTS.md
+
+# Debug / tool logs
+.playwright-mcp/
+
+# Agent OS scheduled tasks (contains session IDs)
+Daily Report/.claude/
+
 # Worktrees & temp
 .opencode/
 .worktrees/
