@@ -22,7 +22,7 @@ and the dashboard hit-rate summary.
 | Capture | Implemented for core MVP paths | Claude Code, Codex, Cursor parsers, git hook signal ingestion, privacy filtering |
 | Distill / crystallization | Implemented and wired | daemon starts a periodic distill loop, explicit signals become candidate rules |
 | Rule storage | Implemented | SQLite rules, sources, versions, events, projects, user memories |
-| Cross-agent output | Implemented | Claude Code, Cursor, Codex, Copilot adapters and managed-block writes |
+| Cross-agent output | Implemented | Claude Code, Cursor, Codex, OpenClaw, and Copilot adapters with managed-block writes |
 | Review flow | Implemented | `shadow review`, `/api/rules?status=candidate`, batch approve/reject |
 | Rule management UI/API | Implemented | CRUD, timeline, events, versions, rollback, config, adapters, conflicts |
 | Effectiveness dashboard | Implemented as proxy | hit-rate endpoint, rule-hit events, adapter sync status, memory map |
@@ -40,6 +40,17 @@ and the dashboard hit-rate summary.
   remain experimental.
 - Memory map graph view is PRD-adjacent Pro/visualization work; it should stay
   fast, but it should not displace the rules/review workflow.
+
+## PRD Alignment Changes In Follow-up Iteration
+
+- Added the OpenClaw adapter required by the Shadow_qt MVP adapter contract:
+  project rules write to `OPENCLAW.md`, global rules write to `~/OPENCLAW.md`.
+- Added OpenClaw to default config, daemon sync, dashboard adapter status,
+  adapter toggling, onboarding target display, health sync status, task
+  injection, and uninstall managed-block cleanup.
+- Added focused regression coverage for OpenClaw adapter writes/removal, default
+  config enablement, API listing/toggle persistence, task injection,
+  onboarding display, and health status.
 
 ## Performance Changes In This Pass
 
@@ -61,6 +72,7 @@ Run after this pass:
 - `go test ./internal/storage -run "Test(SourceRepoEvidenceByRuleIDs|EventRepoAgentsByRuleIDs)"`
 - `go test ./internal/server -run "TestDashboardMap|TestConflictPairsEndpoint"`
 - `npm run build` from `web`
+- `go test ./internal/adapter ./internal/config ./internal/daemon ./internal/server`
 
 Full verification should include `go test ./...`, `go vet ./...`, frontend lint,
 and a browser smoke test against the rebuilt local console.

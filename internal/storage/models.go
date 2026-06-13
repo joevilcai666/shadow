@@ -15,13 +15,13 @@ type Rule struct {
 	Status         string   `json:"status"` // "candidate" | "active" | "disabled" | "conflicted"
 	Version        int      `json:"version"`
 	// 借鉴 Shadow Brain：Source-backed memory + 置信度
-	Importance   float64  `json:"importance"`   // 0-1, 用户指定或系统计算
-	DecayScore   float64  `json:"decay_score"`  // 30天半衰期衰减后的当前置信度
-	LastHitAt    string   `json:"last_hit_at"`   // 上次命中时间，用于计算衰减
-	SourcePaths  []string `json:"source_paths"` // 证据文件/路径，反幻觉锚点
-	Author       string   `json:"author"`        // "user" | "agent" | "system"
-	CreatedAt    string   `json:"created_at"`
-	UpdatedAt    string   `json:"updated_at"`
+	Importance  float64  `json:"importance"`   // 0-1, 用户指定或系统计算
+	DecayScore  float64  `json:"decay_score"`  // 30天半衰期衰减后的当前置信度
+	LastHitAt   string   `json:"last_hit_at"`  // 上次命中时间，用于计算衰减
+	SourcePaths []string `json:"source_paths"` // 证据文件/路径，反幻觉锚点
+	Author      string   `json:"author"`       // "user" | "agent" | "system"
+	CreatedAt   string   `json:"created_at"`
+	UpdatedAt   string   `json:"updated_at"`
 }
 
 // Source traces the origin of a rule — which signal generated it.
@@ -83,9 +83,9 @@ type Project struct {
 // UserMemory — 用户个人上下文（跨 agent 共享）
 type UserMemory struct {
 	ID          string   `json:"id"`
-	UserID      string   `json:"user_id"`       // 跨 agent 共享
-	Content     string   `json:"content"`       // markdown 格式
-	Category    string   `json:"category"`      // "preference" | "convention" | "context"
+	UserID      string   `json:"user_id"`  // 跨 agent 共享
+	Content     string   `json:"content"`  // markdown 格式
+	Category    string   `json:"category"` // "preference" | "convention" | "context"
 	ProjectPath string   `json:"project_path,omitempty"`
 	Tags        []string `json:"tags"`
 	CreatedAt   string   `json:"created_at"`
@@ -94,32 +94,32 @@ type UserMemory struct {
 
 // AgentMemory — agent procedural memory（从 usage 提取）
 type AgentMemory struct {
-	ID            string   `json:"id"`
-	AgentName     string   `json:"agent_name"`    // "codex" | "claude-code" | "cursor"
-	Content       string   `json:"content"`
-	ExtractedFrom string   `json:"extracted_from"` // event_id 或 task_id
-	CreatedAt     string   `json:"created_at"`
+	ID            string `json:"id"`
+	AgentName     string `json:"agent_name"` // "codex" | "claude-code" | "cursor" | "openclaw"
+	Content       string `json:"content"`
+	ExtractedFrom string `json:"extracted_from"` // event_id 或 task_id
+	CreatedAt     string `json:"created_at"`
 }
 
 // SessionMemory — 单次 coding session 的上下文快照
 type SessionMemory struct {
-	ID           string   `json:"id"`
-	SessionID    string   `json:"session_id"`
-	AgentName    string   `json:"agent_name"`
-	ProjectPath  string   `json:"project_path"`
-	ContextDump  string   `json:"context_dump"`  // 该 session 的完整 context 快照
-	TaskSummary  string   `json:"task_summary"`  // 用户描述的任务概要
-	CreatedAt    string   `json:"created_at"`
-	EndedAt      string   `json:"ended_at,omitempty"`
+	ID          string `json:"id"`
+	SessionID   string `json:"session_id"`
+	AgentName   string `json:"agent_name"`
+	ProjectPath string `json:"project_path"`
+	ContextDump string `json:"context_dump"` // 该 session 的完整 context 快照
+	TaskSummary string `json:"task_summary"` // 用户描述的任务概要
+	CreatedAt   string `json:"created_at"`
+	EndedAt     string `json:"ended_at,omitempty"`
 }
 
 // MemoryCard — 记忆卡（用于 UI 展示）
 type MemoryCard struct {
-	Rule          Rule    `json:"rule"`
-	HitCount      int     `json:"hit_count"`
-	DecayScore    float64 `json:"decay_score"`
-	ConfirmedBy   int     `json:"confirmed_by"`   // 有多少个不同 agent 命中过
-	NextBestAction string `json:"next_best_action"` // "keep" | "demote" | "delete" | "merge"
+	Rule           Rule    `json:"rule"`
+	HitCount       int     `json:"hit_count"`
+	DecayScore     float64 `json:"decay_score"`
+	ConfirmedBy    int     `json:"confirmed_by"`     // 有多少个不同 agent 命中过
+	NextBestAction string  `json:"next_best_action"` // "keep" | "demote" | "delete" | "merge"
 }
 
 // RuleFilter defines query parameters for filtering rules.

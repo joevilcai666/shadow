@@ -192,6 +192,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		adapter.NewClaudeCodeAdapter(backupDir),
 		adapter.NewCursorAdapter(backupDir),
 		adapter.NewCodexAdapter(backupDir),
+		adapter.NewOpenClawAdapter(backupDir),
 		adapter.NewCopilotAdapter(backupDir),
 	}
 	slog.Info("adapters initialized", "count", len(d.adapters))

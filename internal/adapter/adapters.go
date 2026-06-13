@@ -103,8 +103,8 @@ func (a *CursorAdapter) Name() string { return "cursor" }
 // capture either way.
 func (a *CursorAdapter) IsInstalled() bool {
 	candidates := []string{
-		"/Applications/Cursor.app", // macOS
-		filepath.Join(a.homeDir, ".local", "share", "cursor"),  // Linux
+		"/Applications/Cursor.app",                                         // macOS
+		filepath.Join(a.homeDir, ".local", "share", "cursor"),              // Linux
 		filepath.Join(a.homeDir, "AppData", "Local", "Programs", "Cursor"), // Windows
 	}
 	for _, p := range candidates {
@@ -150,6 +150,52 @@ func (a *CursorAdapter) TargetPath(scope, projectPath string) string {
 		return filepath.Join(home, ".cursorrules")
 	}
 	return filepath.Join(projectPath, ".cursorrules")
+}
+
+// --- OpenClaw Adapter ---
+
+// OpenClawAdapter writes rules to OPENCLAW.md files.
+type OpenClawAdapter struct {
+	mb *ManagedBlock
+}
+
+// NewOpenClawAdapter creates a new OpenClaw adapter.
+func NewOpenClawAdapter(backupDir string) *OpenClawAdapter {
+	return &OpenClawAdapter{mb: NewManagedBlock(backupDir)}
+}
+
+func (a *OpenClawAdapter) Name() string { return "openclaw" }
+
+func (a *OpenClawAdapter) IsInstalled() bool {
+	return true
+}
+
+func (a *OpenClawAdapter) WriteRules(rules []*storage.Rule, scope, projectPath string) error {
+	targetPath := a.TargetPath(scope, projectPath)
+
+	result, err := a.mb.Write(targetPath, rulesToEntries(rules))
+	if err != nil {
+		return fmt.Errorf("write OPENCLAW.md: %w", err)
+	}
+
+	slog.Info("wrote rules to OPENCLAW.md",
+		"path", targetPath,
+		"rules", len(rules),
+		"verified", result.Verified,
+	)
+	return nil
+}
+
+func (a *OpenClawAdapter) RemoveRules(scope, projectPath string) error {
+	return a.mb.Remove(a.TargetPath(scope, projectPath))
+}
+
+func (a *OpenClawAdapter) TargetPath(scope, projectPath string) string {
+	if scope == "global" {
+		home, _ := os.UserHomeDir()
+		return filepath.Join(home, "OPENCLAW.md")
+	}
+	return filepath.Join(projectPath, "OPENCLAW.md")
 }
 
 // --- Helpers ---

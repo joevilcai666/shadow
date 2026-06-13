@@ -162,10 +162,10 @@ var healthCmd = &cobra.Command{
 		defer resp.Body.Close()
 
 		var dash struct {
-			TotalRules   int `json:"total_rules"`
-			ActiveRules  int `json:"active_rules"`
-			HitsTotal    int `json:"hits_total"`
-			Conflicts    int `json:"conflicts"`
+			TotalRules  int `json:"total_rules"`
+			ActiveRules int `json:"active_rules"`
+			HitsTotal   int `json:"hits_total"`
+			Conflicts   int `json:"conflicts"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&dash); err != nil {
 			return fmt.Errorf("parse dashboard: %w", err)
@@ -286,11 +286,11 @@ func printStatus(client *daemon.Client) error {
 // --- review command: TUI for reviewing candidate rules ---
 
 type reviewItem struct {
-	ID        string `json:"id"`
-	Content   string `json:"content"`
-	Category  string `json:"category"`
+	ID         string  `json:"id"`
+	Content    string  `json:"content"`
+	Category   string  `json:"category"`
 	Confidence float64 `json:"confidence"`
-	Scope     string `json:"scope"`
+	Scope      string  `json:"scope"`
 }
 
 type reviewModel struct {
@@ -493,7 +493,7 @@ var uninstallCmd = &cobra.Command{
 			client.Send("stop", nil)
 		}
 
-			uninstallDaemon()
+		uninstallDaemon()
 
 		if cleanBlocks {
 			fmt.Println("Removing managed blocks from agent context files...")
@@ -502,6 +502,8 @@ var uninstallCmd = &cobra.Command{
 				adapter.NewClaudeCodeAdapter(backupDir),
 				adapter.NewCursorAdapter(backupDir),
 				adapter.NewCodexAdapter(backupDir),
+				adapter.NewOpenClawAdapter(backupDir),
+				adapter.NewCopilotAdapter(backupDir),
 			}
 
 			removed := 0
@@ -556,7 +558,7 @@ func findProjectContexts(home string) []string {
 		checkDirs = append(checkDirs, cwd)
 	}
 
-	contextFiles := []string{"CLAUDE.md", ".cursorrules", "AGENTS.md", ".github/copilot-instructions.md"}
+	contextFiles := []string{"CLAUDE.md", ".cursorrules", "AGENTS.md", "OPENCLAW.md", ".github/copilot-instructions.md"}
 
 	for _, dir := range checkDirs {
 		// Check if this dir itself has context files.
@@ -918,10 +920,10 @@ This command:
 
 		// Create rule via API.
 		rulePayload := map[string]any{
-			"content": content,
-			"scope":   scope,
-			"status":  "candidate",
-			"tags":    tags,
+			"content":    content,
+			"scope":      scope,
+			"status":     "candidate",
+			"tags":       tags,
 			"confidence": 0.7,
 		}
 		if scope == "project" {
@@ -1058,7 +1060,7 @@ func init() {
 	rootCmd.AddCommand(openCmd)
 	rootCmd.AddCommand(mcpCmd)
 	uninstallCmd.Flags().Bool("clean-blocks", false, "Remove managed blocks from agent context files")
-	taskCmd.Flags().String("agent", "", "Target agent (claude-code, cursor, codex, copilot)")
+	taskCmd.Flags().String("agent", "", "Target agent (claude-code, cursor, codex, openclaw, copilot)")
 	storeCmd.Flags().String("scope", "global", "Rule scope (global or project)")
 	storeCmd.Flags().String("tags", "", "Comma-separated tags")
 	storeMemoryCmd.Flags().String("category", "preference", "Memory category (preference, convention, context)")

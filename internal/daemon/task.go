@@ -45,10 +45,10 @@ func (tc *TaskCommand) RunTask(taskDesc, agentName, projectPath string) (*TaskRe
 	engine := distill.NewContextEngine(tc.ruleRepo)
 	req := distill.TaskContextRequest{
 		TaskDescription: taskDesc,
-		ProjectPath:    projectPath,
-		AgentName:      agentName,
-		Tags:           tags,
-		MaxRules:       5,
+		ProjectPath:     projectPath,
+		AgentName:       agentName,
+		Tags:            tags,
+		MaxRules:        5,
 	}
 
 	ctx, err := engine.Extract(req)
@@ -81,6 +81,8 @@ func (tc *TaskCommand) InjectIntoAgent(agentName string, rules []*storage.Rule, 
 		a = adapter.NewCursorAdapter(backupDir)
 	case "codex":
 		a = adapter.NewCodexAdapter(backupDir)
+	case "openclaw":
+		a = adapter.NewOpenClawAdapter(backupDir)
 	case "copilot":
 		a = adapter.NewCopilotAdapter(backupDir)
 	default:

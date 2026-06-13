@@ -447,6 +447,52 @@ func TestToggleAdapterPersistsAndTriggersSync(t *testing.T) {
 	}
 }
 
+func TestOpenClawAdapterListedAndToggleable(t *testing.T) {
+	s, _, dir := testEnvWithDir(t)
+
+	req := newLocalRequest("GET", "/api/adapters", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list adapters status: got %d, want %d. body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	var adapters []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &adapters); err != nil {
+		t.Fatalf("decode adapters: %v", err)
+	}
+	found := false
+	for _, a := range adapters {
+		if a["name"] == "openclaw" {
+			found = true
+			if a["target_path"] != "OPENCLAW.md (project) + ~/OPENCLAW.md (global)" {
+				t.Fatalf("openclaw target_path = %v", a["target_path"])
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("adapters = %#v, want openclaw", adapters)
+	}
+
+	req = newLocalRequest("POST", "/api/adapters/openclaw/toggle", bytes.NewReader([]byte(`{"enabled":false}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("openclaw toggle status: got %d, want %d. body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if s.configMgr.Get().Adapters.OpenClaw.Enabled {
+		t.Error("openclaw adapter should be disabled in live config")
+	}
+
+	reloaded := config.NewManager(dir)
+	if err := reloaded.LoadGlobal(); err != nil {
+		t.Fatalf("reload config: %v", err)
+	}
+	if reloaded.Get().Adapters.OpenClaw.Enabled {
+		t.Error("openclaw adapter should persist as disabled")
+	}
+}
+
 func TestLocalhostOnly(t *testing.T) {
 	s, _ := testEnv(t)
 

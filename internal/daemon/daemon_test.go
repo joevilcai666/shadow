@@ -113,6 +113,26 @@ func TestOnboardingEnterFromWelcomeGoesToPrivacyStep(t *testing.T) {
 	}
 }
 
+func TestOnboardingIncludesOpenClawTarget(t *testing.T) {
+	m := NewOnboardingModel("test")
+
+	found := false
+	for _, item := range m.agents.Items {
+		if item.Label == "OpenClaw" {
+			found = true
+			if !strings.Contains(item.Description, "OPENCLAW.md") {
+				t.Fatalf("OpenClaw description = %q, want OPENCLAW.md", item.Description)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("onboarding agents = %#v, want OpenClaw", m.agents.Items)
+	}
+	if m.agentTargets["OpenClaw"] != "OPENCLAW.md (project) + ~/OPENCLAW.md (global)" {
+		t.Fatalf("OpenClaw target = %q", m.agentTargets["OpenClaw"])
+	}
+}
+
 func TestOnboardingScanScopesRulesAndSelectedAgentsToCurrentProject(t *testing.T) {
 	cwd := t.TempDir()
 	if err := os.WriteFile(filepath.Join(cwd, "go.mod"), []byte("module example.com/shadow-test"), 0644); err != nil {

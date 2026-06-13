@@ -122,6 +122,40 @@ func TestCursorAdapterTargetPath(t *testing.T) {
 	}
 }
 
+func TestOpenClawAdapterWriteAndRemove(t *testing.T) {
+	dir := t.TempDir()
+	a := NewOpenClawAdapter(filepath.Join(dir, "backups"))
+
+	projectPath := filepath.Join(dir, "project")
+	rules := []*storage.Rule{
+		{ID: "r1", Content: "Use pnpm not npm", Status: "active", Confidence: 0.9},
+		{ID: "r2", Content: "Disabled rule", Status: "disabled", Confidence: 0.4},
+	}
+	if err := a.WriteRules(rules, "project", projectPath); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	target := filepath.Join(projectPath, "OPENCLAW.md")
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("read OPENCLAW.md: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "Use pnpm not npm") {
+		t.Error("OPENCLAW.md should contain active rule")
+	}
+	if strings.Contains(text, "Disabled rule") {
+		t.Error("OPENCLAW.md should not contain disabled rules")
+	}
+
+	if err := a.RemoveRules("project", projectPath); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("OPENCLAW.md with only managed block should be removed, stat err = %v", err)
+	}
+}
+
 func TestCopilotAdapterTargetPath(t *testing.T) {
 	a := &CopilotAdapter{mb: NewManagedBlock(filepath.Join(t.TempDir(), "backups"))}
 

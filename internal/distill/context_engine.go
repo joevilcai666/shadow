@@ -20,18 +20,18 @@ func NewContextEngine(ruleRepo *storage.RuleRepo) *ContextEngine {
 // TaskContextRequest describes the context needed to extract rules for a task.
 type TaskContextRequest struct {
 	TaskDescription string   // free-text task description
-	ProjectPath    string   // current project path
-	AgentName      string   // target agent (codex, claude-code, cursor, copilot)
-	Tags           []string // explicitly requested tags (from structured params)
-	MaxRules       int      // max rules to inject (default 5)
+	ProjectPath     string   // current project path
+	AgentName       string   // target agent (codex, claude-code, cursor, openclaw, copilot)
+	Tags            []string // explicitly requested tags (from structured params)
+	MaxRules        int      // max rules to inject (default 5)
 }
 
 // ExtractedContext is the result of context extraction.
 type ExtractedContext struct {
-	Rules          []*storage.Rule `json:"rules"`           // selected rules
-	TotalFound     int             `json:"total_found"`     // total matching before limit
+	Rules          []*storage.Rule `json:"rules"`       // selected rules
+	TotalFound     int             `json:"total_found"` // total matching before limit
 	ProjectMatched bool            `json:"project_matched"`
-	TagMatches     []string        `json:"tag_matches"`     // tags that had exact hits
+	TagMatches     []string        `json:"tag_matches"` // tags that had exact hits
 }
 
 // Extract extracts relevant rules for the given task request.

@@ -55,16 +55,18 @@ func NewOnboardingModel(version string) OnboardingModel {
 		cwd:     cwd,
 		banner:  components.NewBanner(),
 		agents: NewCheckboxList([]CheckboxItem{
-			{Label: "Claude Code", Description: "→ writes to CLAUDE.md"},
-			{Label: "Cursor", Description: "→ writes to .cursorrules"},
-			{Label: "GitHub Copilot", Description: "→ writes to .github/copilot-instructions.md"},
-			{Label: "Codex", Description: "→ writes to AGENTS.md"},
+			{Label: "Claude Code", Description: "-> writes to CLAUDE.md"},
+			{Label: "Cursor", Description: "-> writes to .cursorrules"},
+			{Label: "GitHub Copilot", Description: "-> writes to .github/copilot-instructions.md"},
+			{Label: "Codex", Description: "-> writes to AGENTS.md"},
+			{Label: "OpenClaw", Description: "-> writes to OPENCLAW.md"},
 		}),
 		agentTargets: map[string]string{
 			"Claude Code":    "CLAUDE.md (project) + ~/.claude/CLAUDE.md (global)",
 			"Cursor":         ".cursorrules (project) + ~/.cursorrules (global)",
 			"GitHub Copilot": ".github/copilot-instructions.md (project)",
 			"Codex":          "AGENTS.md (project) + ~/AGENTS.md (global)",
+			"OpenClaw":       "OPENCLAW.md (project) + ~/OPENCLAW.md (global)",
 		},
 		privacyAccepted: true,
 		dbPath:          filepath.Join(home, ".shadow", "shadow.db"),
@@ -411,6 +413,7 @@ func scanProject(cwd, dbPath string, selectedAgents []CheckboxItem, detectedAgen
 			".cursorrules",
 			".cursor/rules",
 			"AGENTS.md",
+			"OPENCLAW.md",
 			".github/copilot-instructions.md",
 		}
 
@@ -476,7 +479,7 @@ func countScanFiles(cwd string) int {
 	files := []string{
 		"package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb",
 		"go.mod", "Cargo.toml", "pyproject.toml",
-		"CLAUDE.md", ".cursorrules", "AGENTS.md",
+		"CLAUDE.md", ".cursorrules", "AGENTS.md", "OPENCLAW.md",
 	}
 	for _, f := range files {
 		if _, err := os.Stat(filepath.Join(cwd, f)); err == nil {

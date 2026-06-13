@@ -20,6 +20,12 @@ func TestDefaultConfig(t *testing.T) {
 	if !cfg.Adapters.ClaudeCode.Enabled {
 		t.Error("claude_code adapter should be enabled by default")
 	}
+	if !cfg.Adapters.OpenClaw.Enabled {
+		t.Error("openclaw adapter should be enabled by default")
+	}
+	if !AdapterEnabled(cfg, "openclaw") {
+		t.Error("AdapterEnabled should recognize openclaw")
+	}
 }
 
 func TestLoadGlobal(t *testing.T) {

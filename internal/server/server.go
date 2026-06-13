@@ -649,6 +649,10 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 				"enabled":     cfg.Adapters.Codex.Enabled,
 				"global_path": cfg.Adapters.Codex.GlobalPath,
 			},
+			"openclaw": map[string]any{
+				"enabled":     cfg.Adapters.OpenClaw.Enabled,
+				"global_path": cfg.Adapters.OpenClaw.GlobalPath,
+			},
 			"copilot": map[string]any{
 				"enabled":     cfg.Adapters.Copilot.Enabled,
 				"global_path": cfg.Adapters.Copilot.GlobalPath,
@@ -705,7 +709,7 @@ func (s *Server) getDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	agentCoverage, _ := s.eventRepo.CountRuleHitsByAgent()
 	adapterSync := map[string]any{}
-	for _, name := range []string{"claude_code", "cursor", "codex", "copilot"} {
+	for _, name := range []string{"claude_code", "cursor", "codex", "openclaw", "copilot"} {
 		if latest, err := s.eventRepo.LatestSyncByAgent(name); err == nil && latest != nil {
 			adapterSync[name] = latest
 		}
@@ -1215,7 +1219,7 @@ func tagOverlapSet(seen map[string]struct{}, b []string) int {
 // attributed to all known agents; global-scoped rules are too. The
 // frontend treats agents as display labels, so a coarse list is fine.
 func ruleAgents(_ string) []string {
-	return []string{"Claude Code", "Cursor", "Codex"}
+	return []string{"Claude Code", "Cursor", "Codex", "OpenClaw"}
 }
 
 // firstLine trims a string to its first line and shortens if longer
@@ -1373,6 +1377,13 @@ func (s *Server) listAdapters(w http.ResponseWriter, r *http.Request) {
 			"installed":   adapter.NewCodexAdapter(backupDir).IsInstalled(),
 			"enabled":     s.configMgr.Get().Adapters.Codex.Enabled,
 			"target_path": "AGENTS.md (project) + ~/AGENTS.md (global)",
+		}),
+		s.adapterStatus(map[string]any{
+			"name":        "openclaw",
+			"label":       "OpenClaw",
+			"installed":   adapter.NewOpenClawAdapter(backupDir).IsInstalled(),
+			"enabled":     s.configMgr.Get().Adapters.OpenClaw.Enabled,
+			"target_path": "OPENCLAW.md (project) + ~/OPENCLAW.md (global)",
 		}),
 		s.adapterStatus(map[string]any{
 			"name":        "copilot",
@@ -1563,6 +1574,11 @@ func applyConfigUpdates(cfg *config.Config, updates map[string]any) bool {
 				cfg.Adapters.Codex.Enabled = b
 				adapterChanged = true
 			}
+		case "openclaw_enabled":
+			if b, ok := val.(bool); ok {
+				cfg.Adapters.OpenClaw.Enabled = b
+				adapterChanged = true
+			}
 		case "copilot_enabled":
 			if b, ok := val.(bool); ok {
 				cfg.Adapters.Copilot.Enabled = b
@@ -1589,7 +1605,7 @@ func stringsFromJSONValues(values []any) []string {
 
 func isKnownAdapter(name string) bool {
 	switch name {
-	case "claude_code", "cursor", "codex", "copilot":
+	case "claude_code", "cursor", "codex", "openclaw", "copilot":
 		return true
 	default:
 		return false
@@ -1604,6 +1620,8 @@ func setAdapterEnabled(cfg *config.Config, name string, enabled bool) {
 		cfg.Adapters.Cursor.Enabled = enabled
 	case "codex":
 		cfg.Adapters.Codex.Enabled = enabled
+	case "openclaw":
+		cfg.Adapters.OpenClaw.Enabled = enabled
 	case "copilot":
 		cfg.Adapters.Copilot.Enabled = enabled
 	}

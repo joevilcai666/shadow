@@ -9,19 +9,19 @@ import (
 
 // HealthStats holds memory layer health statistics.
 type HealthStats struct {
-	TotalRules      int            `json:"total_rules"`
-	ActiveRules     int            `json:"active_rules"`
-	CandidateRules  int            `json:"candidate_rules"`
-	DisabledRules   int            `json:"disabled_rules"`
-	ConflictedRules int            `json:"conflicted_rules"`
-	LowHitRules     int            `json:"low_hit_rules"` // rules with decay_score < 0.3
-	GlobalRules     int            `json:"global_rules"`
-	ProjectRules    int            `json:"project_rules"`
-	HitRate         float64        `json:"hit_rate"`         // 0-100%
-	HitRateTrend    string         `json:"hit_rate_trend"`   // "up" | "down" | "stable"
-	LastHit         *LastHitInfo    `json:"last_hit"`
-	AdapterSyncs    []AdapterSync  `json:"adapter_syncs"`
-	GeneratedAt     string         `json:"generated_at"`
+	TotalRules      int           `json:"total_rules"`
+	ActiveRules     int           `json:"active_rules"`
+	CandidateRules  int           `json:"candidate_rules"`
+	DisabledRules   int           `json:"disabled_rules"`
+	ConflictedRules int           `json:"conflicted_rules"`
+	LowHitRules     int           `json:"low_hit_rules"` // rules with decay_score < 0.3
+	GlobalRules     int           `json:"global_rules"`
+	ProjectRules    int           `json:"project_rules"`
+	HitRate         float64       `json:"hit_rate"`       // 0-100%
+	HitRateTrend    string        `json:"hit_rate_trend"` // "up" | "down" | "stable"
+	LastHit         *LastHitInfo  `json:"last_hit"`
+	AdapterSyncs    []AdapterSync `json:"adapter_syncs"`
+	GeneratedAt     string        `json:"generated_at"`
 }
 
 // LastHitInfo describes the most recent rule hit.
@@ -118,6 +118,7 @@ func GetHealthStats(db *sql.DB) (*HealthStats, error) {
 		{AgentName: "claude-code", LastSync: "unknown", Status: "stale"},
 		{AgentName: "cursor", LastSync: "unknown", Status: "stale"},
 		{AgentName: "codex", LastSync: "unknown", Status: "stale"},
+		{AgentName: "openclaw", LastSync: "unknown", Status: "stale"},
 		{AgentName: "copilot", LastSync: "unknown", Status: "stale"},
 	}
 	if db != nil {
@@ -151,7 +152,7 @@ func GetHealthStats(db *sql.DB) (*HealthStats, error) {
 		ActiveRules:     active,
 		CandidateRules:  candidate,
 		DisabledRules:   disabled,
-		ConflictedRules:  conflicted,
+		ConflictedRules: conflicted,
 		LowHitRules:     lowHit,
 		GlobalRules:     global,
 		ProjectRules:    project,

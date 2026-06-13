@@ -134,6 +134,7 @@ export interface Config {
     claude_code: { enabled: boolean };
     cursor: { enabled: boolean };
     codex: { enabled: boolean };
+    openclaw: { enabled: boolean };
     copilot: { enabled: boolean };
   };
   server: { port: number; bind: string };

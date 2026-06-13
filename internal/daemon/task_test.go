@@ -96,6 +96,26 @@ func TestInjectIntoAgentWritesAgentFile(t *testing.T) {
 	}
 }
 
+func TestInjectIntoAgentWritesOpenClawFile(t *testing.T) {
+	tc, rule := newTaskCommandWithSeed(t)
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	projectDir := t.TempDir()
+
+	if err := tc.InjectIntoAgent("openclaw", []*storage.Rule{rule}, projectDir); err != nil {
+		t.Fatalf("InjectIntoAgent openclaw: %v", err)
+	}
+
+	written, err := os.ReadFile(filepath.Join(projectDir, "OPENCLAW.md"))
+	if err != nil {
+		t.Fatalf("expected OPENCLAW.md to be written: %v", err)
+	}
+	if !strings.Contains(string(written), rule.Content) {
+		t.Errorf("OPENCLAW.md does not contain rule content; got:\n%s", written)
+	}
+}
+
 // TestInjectIntoAgentRejectsUnknownAgent ensures we don't silently write to a
 // garbage path for an unsupported agent name.
 func TestInjectIntoAgentRejectsUnknownAgent(t *testing.T) {

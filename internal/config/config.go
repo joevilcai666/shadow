@@ -51,6 +51,7 @@ type AdaptersConfig struct {
 	ClaudeCode AdapterConfig `yaml:"claude_code"`
 	Cursor     AdapterConfig `yaml:"cursor"`
 	Codex      AdapterConfig `yaml:"codex"`
+	OpenClaw   AdapterConfig `yaml:"openclaw"`
 	Copilot    AdapterConfig `yaml:"copilot"`
 }
 
@@ -114,6 +115,7 @@ func DefaultConfig() *Config {
 			ClaudeCode: AdapterConfig{Enabled: true, GlobalPath: "~/.claude/CLAUDE.md"},
 			Cursor:     AdapterConfig{Enabled: true},
 			Codex:      AdapterConfig{Enabled: true},
+			OpenClaw:   AdapterConfig{Enabled: true},
 			Copilot:    AdapterConfig{Enabled: true},
 		},
 		Server: ServerConfig{
@@ -355,6 +357,8 @@ func AdapterEnabled(cfg *Config, name string) bool {
 		return cfg.Adapters.Cursor.Enabled
 	case "codex":
 		return cfg.Adapters.Codex.Enabled
+	case "openclaw":
+		return cfg.Adapters.OpenClaw.Enabled
 	case "copilot":
 		return cfg.Adapters.Copilot.Enabled
 	default:
