@@ -732,8 +732,27 @@ This command:
 		fmt.Scanln()
 
 		// Inject rules into agent via API.
+		// NOTE(SHADOW-037): file injection into the agent's context is still
+		// stubbed. But the user just confirmed they want to use these rules for
+		// this task — that is itself a real "hit" signal, so we record it now
+		// (SHADOW-041). It refreshes each rule's decay_score and feeds the
+		// hit-rate metric.
 		markdown := formatRulesForAgent(filtered, agentName)
 		_ = markdown // Would be injected via daemon in full implementation
+
+		for _, r := range filtered {
+			hitBody, _ := json.Marshal(map[string]any{
+				"agent_name":   agentName,
+				"project_path": projectPath,
+			})
+			hitReq, _ := http.NewRequest("POST",
+				"http://localhost:7878/api/rules/"+r.ID+"/hit",
+				strings.NewReader(string(hitBody)))
+			hitReq.Header.Set("Content-Type", "application/json")
+			if resp, err := http.DefaultClient.Do(hitReq); err == nil {
+				resp.Body.Close()
+			}
+		}
 
 		fmt.Printf("\n  %s Context injected into %s\n",
 			greenStyle.Render("✓"), agentName)
@@ -934,6 +953,94 @@ This command:
 	},
 }
 
+// --- shadow store-memory command: persist a cross-agent user memory (SHADOW-038) ---
+
+var storeMemoryCmd = &cobra.Command{
+	Use:   "store-memory",
+	Short: "Save a personal memory shared across all your agents",
+	Long: `Save a user-authored memory (preference / convention / context) that every
+agent can see. Unlike 'shadow store' (which crystallizes a reviewable Rule), a
+memory is always-active personal context — use it for things like "I prefer
+Conventional Commits" or "this project uses pnpm".
+
+Examples:
+  shadow store-memory "always use Conventional Commits" --category=convention
+  shadow store-memory "this project uses pnpm" --scope=project --tags=toolchain
+  shadow store-memory "deploy via ./scripts/release.sh" --category=context`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return fmt.Errorf("usage: shadow store-memory <memory content>")
+		}
+
+		content := strings.Join(args, " ")
+		category, _ := cmd.Flags().GetString("category")
+		switch category {
+		case "preference", "convention", "context":
+		default:
+			return fmt.Errorf("invalid --category %q: must be preference, convention, or context", category)
+		}
+		scope, _ := cmd.Flags().GetString("scope")
+		userID, _ := cmd.Flags().GetString("user")
+		if userID == "" {
+			userID = "local"
+		}
+		tagsStr, _ := cmd.Flags().GetString("tags")
+		var tags []string
+		if tagsStr != "" {
+			for _, t := range strings.Split(tagsStr, ",") {
+				if t = strings.TrimSpace(t); t != "" {
+					tags = append(tags, t)
+				}
+			}
+		}
+
+		// Check daemon.
+		client := daemon.NewClient()
+		if !client.IsRunning() {
+			fmt.Println(yellowStyle.Render("⚠ Shadow daemon is not running."))
+			fmt.Println("Run 'shadow start' first.")
+			return nil
+		}
+
+		payload := map[string]any{
+			"content":  content,
+			"category": category,
+			"user_id":  userID,
+			"tags":     tags,
+		}
+		if scope == "project" {
+			if cwd, err := os.Getwd(); err == nil {
+				payload["project_path"] = cwd
+			}
+		}
+
+		body, _ := json.Marshal(payload)
+		req, _ := http.NewRequest("POST", "http://localhost:7878/api/memories",
+			strings.NewReader(string(body)))
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return fmt.Errorf("create memory: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode >= 400 {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			return fmt.Errorf("server error: %s", string(bodyBytes))
+		}
+
+		fmt.Println()
+		fmt.Printf("  %s Memory saved (%s)\n", greenStyle.Render("✓"), category)
+		fmt.Printf("  %s\n", dimStyle.Render(content))
+		if scope == "project" {
+			fmt.Printf("  %s scoped to this project\n", dimStyle.Render("•"))
+		}
+		fmt.Println()
+
+		return nil
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(serveCmd)
@@ -944,6 +1051,7 @@ func init() {
 	rootCmd.AddCommand(reviewCmd)
 	rootCmd.AddCommand(taskCmd)
 	rootCmd.AddCommand(storeCmd)
+	rootCmd.AddCommand(storeMemoryCmd)
 	rootCmd.AddCommand(uninstallCmd)
 	rootCmd.AddCommand(openCmd)
 	rootCmd.AddCommand(mcpCmd)
@@ -951,6 +1059,10 @@ func init() {
 	taskCmd.Flags().String("agent", "", "Target agent (claude-code, cursor, codex, copilot)")
 	storeCmd.Flags().String("scope", "global", "Rule scope (global or project)")
 	storeCmd.Flags().String("tags", "", "Comma-separated tags")
+	storeMemoryCmd.Flags().String("category", "preference", "Memory category (preference, convention, context)")
+	storeMemoryCmd.Flags().String("scope", "global", "Scope (global, or project to attach to current dir)")
+	storeMemoryCmd.Flags().String("tags", "", "Comma-separated tags")
+	storeMemoryCmd.Flags().String("user", "local", "User id (local-first; defaults to 'local')")
 }
 
 func main() {

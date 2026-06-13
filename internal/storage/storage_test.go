@@ -484,3 +484,171 @@ func TestComputeDiff(t *testing.T) {
 		t.Errorf("context not preserved on multi-line diff: %q", got)
 	}
 }
+
+// daysAgoRFC3339 lives in event_repo.go (shared with production code).
+
+func TestUserMemoryCRUD(t *testing.T) {
+	db := openTestDB(t)
+	repo := NewUserMemoryRepo(db)
+
+	m := &UserMemory{
+		ID:       NewID(),
+		UserID:   "local",
+		Content:  "Use Conventional Commits for all commit messages",
+		Category: "convention",
+		Tags:     []string{"git", "workflow"},
+	}
+	if err := repo.Create(m); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := repo.GetByID(m.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got == nil || got.Content != m.Content || got.Category != "convention" {
+		t.Fatalf("get = %#v, want content %q / category convention", got, m.Content)
+	}
+	if len(got.Tags) != 2 {
+		t.Fatalf("tags = %v, want 2", got.Tags)
+	}
+
+	listed, err := repo.List("local", "")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("list len = %d, want 1", len(listed))
+	}
+
+	if err := repo.Delete(m.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	gone, _ := repo.GetByID(m.ID)
+	if gone != nil {
+		t.Fatalf("after delete, get = %#v, want nil", gone)
+	}
+}
+
+func TestRuleTouchHit(t *testing.T) {
+	db := openTestDB(t)
+	ruleRepo := NewRuleRepo(db)
+	versionRepo := NewVersionRepo(db)
+
+	rule := &Rule{
+		ID: NewID(), Content: "Use pnpm", Scope: "global",
+		Confidence: 0.9, Status: "active", Version: 1,
+		CreatedAt: Now(), UpdatedAt: Now(),
+	}
+	if err := ruleRepo.Create(rule); err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	now := Now()
+	score := ComputeDecayScore(rule.Confidence, now)
+	if err := ruleRepo.TouchHit(rule.ID, now, score); err != nil {
+		t.Fatalf("touch hit: %v", err)
+	}
+
+	refreshed, err := ruleRepo.GetByID(rule.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if refreshed.LastHitAt != now {
+		t.Errorf("last_hit_at = %q, want %q", refreshed.LastHitAt, now)
+	}
+	// A freshly-hit rule should be at (near) full confidence.
+	if refreshed.DecayScore < rule.Confidence*0.99 {
+		t.Errorf("decay_score = %f, want ~%f (full confidence after hit)", refreshed.DecayScore, rule.Confidence)
+	}
+	// A hit must NOT create a version snapshot. Create seeds the initial
+	// version (v1), so the count must stay the same after TouchHit.
+	beforeVersions, err := versionRepo.ListByRuleID(rule.ID)
+	if err != nil {
+		t.Fatalf("list versions before: %v", err)
+	}
+	// re-touch to be sure repeated hits don't churn versions either.
+	if err := ruleRepo.TouchHit(rule.ID, now, score); err != nil {
+		t.Fatalf("touch hit #2: %v", err)
+	}
+	afterVersions, err := versionRepo.ListByRuleID(rule.ID)
+	if err != nil {
+		t.Fatalf("list versions after: %v", err)
+	}
+	if len(afterVersions) != len(beforeVersions) {
+		t.Errorf("versions after hit = %d, want %d (a hit is not an edit)", len(afterVersions), len(beforeVersions))
+	}
+}
+
+func TestEventHitRateAggregation(t *testing.T) {
+	db := openTestDB(t)
+	ruleRepo := NewRuleRepo(db)
+	eventRepo := NewEventRepo(db)
+
+	rule := &Rule{
+		ID: NewID(), Content: "Use pnpm", Scope: "global",
+		Status: "active", Version: 1, CreatedAt: Now(), UpdatedAt: Now(),
+	}
+	if err := ruleRepo.Create(rule); err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	// Seed rule_hit events at known ages: today (2x), 3 days ago (1x), 10 days ago (1x).
+	for _, ts := range []string{Now(), Now(), daysAgoRFC3339(3), daysAgoRFC3339(10)} {
+		if err := eventRepo.Create(&Event{
+			ID: NewID(), RuleID: rule.ID, EventType: "rule_hit",
+			AgentName: "claude-code", Timestamp: ts,
+		}); err != nil {
+			t.Fatalf("create event: %v", err)
+		}
+	}
+
+	// Total hits = 4.
+	total, err := eventRepo.CountRuleHitsLastDays(365)
+	if err != nil {
+		t.Fatalf("count last 365: %v", err)
+	}
+	if total != 4 {
+		t.Errorf("total hits = %d, want 4", total)
+	}
+
+	// Last 7 days: today (2) + 3 days (1) = 3 (10 days excluded).
+	last7, err := eventRepo.CountRuleHitsLastDays(7)
+	if err != nil {
+		t.Fatalf("last 7: %v", err)
+	}
+	if last7 != 3 {
+		t.Errorf("last 7 days = %d, want 3", last7)
+	}
+
+	// Last 14 days: today (2) + 3 days (1) + 10 days (1) = 4.
+	// last-week (computed by subtraction) = last14 − last7 = 1.
+	last14, err := eventRepo.CountRuleHitsLastDays(14)
+	if err != nil {
+		t.Fatalf("last 14: %v", err)
+	}
+	if last14 != 4 {
+		t.Errorf("last 14 days = %d, want 4", last14)
+	}
+	if got := last14 - last7; got != 1 {
+		t.Errorf("last-week (last14-last7) = %d, want 1", got)
+	}
+
+	// Distinct rules hit in 7 days = 1.
+	distinct, err := eventRepo.DistinctHitRulesLastDays(7)
+	if err != nil {
+		t.Fatalf("distinct: %v", err)
+	}
+	if distinct != 1 {
+		t.Errorf("distinct hit rules = %d, want 1", distinct)
+	}
+
+	// Latest hit exists.
+	latest, err := eventRepo.LatestRuleHit()
+	if err != nil {
+		t.Fatalf("latest: %v", err)
+	}
+	if latest == nil || latest.RuleID != rule.ID {
+		t.Fatalf("latest = %#v, want rule %s", latest, rule.ID)
+	}
+}

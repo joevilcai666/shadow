@@ -138,6 +138,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		storage.NewVersionRepo(db),
 		storage.NewConfigRepo(db),
 		storage.NewProjectRepo(db),
+		storage.NewUserMemoryRepo(db),
 		cfgMgr,
 		config.ServerConfig{Port: 7878, Bind: "127.0.0.1"},
 		mcpServer,

@@ -25,13 +25,14 @@ var staticAssets embed.FS
 
 // Server is the HTTP API server for the Shadow web console.
 type Server struct {
-	ruleRepo    *storage.RuleRepo
-	sourceRepo  *storage.SourceRepo
-	eventRepo   *storage.EventRepo
-	versionRepo *storage.VersionRepo
-	configRepo  *storage.ConfigRepo
-	projectRepo *storage.ProjectRepo
-	configMgr   *config.Manager
+	ruleRepo      *storage.RuleRepo
+	sourceRepo    *storage.SourceRepo
+	eventRepo     *storage.EventRepo
+	versionRepo   *storage.VersionRepo
+	configRepo    *storage.ConfigRepo
+	projectRepo   *storage.ProjectRepo
+	userMemoryRepo *storage.UserMemoryRepo
+	configMgr     *config.Manager
 	router      *mux.Router
 	wsHub       *WebSocketHub
 	cfg         config.ServerConfig
@@ -60,22 +61,24 @@ func New(
 	versionRepo *storage.VersionRepo,
 	configRepo *storage.ConfigRepo,
 	projectRepo *storage.ProjectRepo,
+	userMemoryRepo *storage.UserMemoryRepo,
 	configMgr *config.Manager,
 	cfg config.ServerConfig,
 	mcpServer *adapter.MCPServer,
 ) *Server {
 	s := &Server{
-		ruleRepo:    ruleRepo,
-		sourceRepo:  sourceRepo,
-		eventRepo:   eventRepo,
-		versionRepo: versionRepo,
-		configRepo:  configRepo,
-		projectRepo: projectRepo,
-		configMgr:   configMgr,
-		router:      mux.NewRouter(),
-		wsHub:       NewWebSocketHub(),
-		cfg:         cfg,
-		mcpServer:   mcpServer,
+		ruleRepo:       ruleRepo,
+		sourceRepo:     sourceRepo,
+		eventRepo:      eventRepo,
+		versionRepo:    versionRepo,
+		configRepo:     configRepo,
+		projectRepo:    projectRepo,
+		userMemoryRepo: userMemoryRepo,
+		configMgr:      configMgr,
+		router:         mux.NewRouter(),
+		wsHub:          NewWebSocketHub(),
+		cfg:            cfg,
+		mcpServer:      mcpServer,
 	}
 	s.routes()
 	return s
@@ -119,6 +122,11 @@ func (s *Server) routes() {
 	api.HandleFunc("/rules/{id}/hit", s.recordRuleHit).Methods("POST")
 	api.HandleFunc("/rules/batch", s.batchRules).Methods("POST")
 
+	// User memories (cross-agent personal context — SHADOW-038)
+	api.HandleFunc("/memories", s.listMemories).Methods("GET")
+	api.HandleFunc("/memories", s.createMemory).Methods("POST")
+	api.HandleFunc("/memories/{id}", s.deleteMemory).Methods("DELETE")
+
 	// Projects
 	api.HandleFunc("/projects", s.listProjects).Methods("GET")
 	api.HandleFunc("/projects", s.createProject).Methods("POST")
@@ -132,6 +140,7 @@ func (s *Server) routes() {
 	api.HandleFunc("/dashboard/map", s.getDashboardMap).Methods("GET")
 	api.HandleFunc("/conflicts", s.listConflicts).Methods("GET")
 	api.HandleFunc("/stats", s.getStats).Methods("GET")
+	api.HandleFunc("/stats/hit-rate", s.getHitRate).Methods("GET")
 
 	// Capture
 	api.HandleFunc("/capture/toggle", s.toggleCapture).Methods("POST")
@@ -344,6 +353,85 @@ func (s *Server) deleteRule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// MARK: - User memories (SHADOW-038 /store_memory)
+
+// validMemoryCategories is the allow-list for UserMemory.Category.
+var validMemoryCategories = map[string]bool{
+	"preference":  true,
+	"convention":  true,
+	"context":     true,
+}
+
+// createMemory stores a user-authored, cross-agent personal memory.
+// UserMemory has no status/decay (unlike Rule) — it is always-active context
+// the user explicitly chose to persist.
+func (s *Server) createMemory(w http.ResponseWriter, r *http.Request) {
+	var m storage.UserMemory
+	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(m.Content) == "" {
+		writeError(w, http.StatusBadRequest, "content is required")
+		return
+	}
+	if !validMemoryCategories[m.Category] {
+		writeError(w, http.StatusBadRequest,
+			"category must be one of: preference, convention, context")
+		return
+	}
+	// Single-user, local-first product — no auth. Default to "local" unless
+	// the caller (e.g. --user flag) supplies a different id.
+	if m.UserID == "" {
+		m.UserID = "local"
+	}
+	if m.Tags == nil {
+		m.Tags = []string{}
+	}
+	m.ID = storage.NewID()
+	m.CreatedAt = storage.Now()
+	m.UpdatedAt = storage.Now()
+
+	// Privacy check — same guard as createRule.
+	if found, pattern := s.configMgr.ContainsSensitiveData(m.Content); found {
+		writeError(w, http.StatusBadRequest, "memory contains sensitive data matching pattern: "+pattern)
+		return
+	}
+
+	if err := s.userMemoryRepo.Create(&m); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	s.wsHub.Broadcast(map[string]any{"event": "memory.created", "memory_id": m.ID})
+	writeJSON(w, http.StatusCreated, m)
+}
+
+// listMemories returns user memories, optionally filtered by ?user= and ?project=.
+func (s *Server) listMemories(w http.ResponseWriter, r *http.Request) {
+	user := r.URL.Query().Get("user")
+	project := r.URL.Query().Get("project")
+	memories, err := s.userMemoryRepo.List(user, project)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if memories == nil {
+		memories = []*storage.UserMemory{}
+	}
+	writeJSON(w, http.StatusOK, memories)
+}
+
+// deleteMemory removes a user memory by id.
+func (s *Server) deleteMemory(w http.ResponseWriter, r *http.Request) {
+	id := mux.Vars(r)["id"]
+	if err := s.userMemoryRepo.Delete(id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
 func (s *Server) getRuleTimeline(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
 	sources, err := s.sourceRepo.ListByRuleID(id)
@@ -465,15 +553,16 @@ func (s *Server) recordRuleHit(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 	if req.AgentName == "" {
-		req.AgentName = "welcome_demo"
+		req.AgentName = "unknown"
 	}
 	if req.ProjectPath == "" {
 		req.ProjectPath = rule.ProjectPath
 	}
 	if req.Details == "" {
-		req.Details = "rule matched demo prompt"
+		req.Details = "rule surfaced via shadow task"
 	}
 
+	now := storage.Now()
 	event := &storage.Event{
 		ID:          storage.NewID(),
 		RuleID:      id,
@@ -482,11 +571,18 @@ func (s *Server) recordRuleHit(w http.ResponseWriter, r *http.Request) {
 		ProjectPath: req.ProjectPath,
 		TargetPath:  req.TargetPath,
 		Details:     req.Details,
-		Timestamp:   storage.Now(),
+		Timestamp:   now,
 	}
 	if err := s.eventRepo.Create(event); err != nil {
 		writeError(w, http.StatusInternalServerError, "record hit: "+err.Error())
 		return
+	}
+	// A hit refreshes decay: the rule just proved useful, so restore it to
+	// near-full confidence (30-day half-life from now). (SHADOW-041)
+	decayScore := storage.ComputeDecayScore(rule.Confidence, now)
+	if err := s.ruleRepo.TouchHit(id, now, decayScore); err != nil {
+		// Non-fatal — the event was recorded; just log the decay refresh failure.
+		slog.Warn("refresh decay after hit", "rule_id", id, "err", err)
 	}
 	s.wsHub.Broadcast(map[string]any{"event": "rule.hit", "rule_id": id, "agent": event.AgentName})
 	writeJSON(w, http.StatusCreated, event)
@@ -639,7 +735,78 @@ func (s *Server) getDashboard(w http.ResponseWriter, r *http.Request) {
 		"agent_coverage":   agentCoverage,
 		"adapter_sync":     adapterSync,
 		"health":           health,
+		"hit_rate":         s.computeHitRate(active),
 	})
+}
+
+// computeHitRate builds the hit-rate summary used by /api/stats/hit-rate and
+// embedded in the dashboard. activeRules is passed in to avoid a second count
+// query when the caller already has it. (SHADOW-041)
+//
+// hit_rate_pct = distinct active rules hit this week / total active rules.
+// This is a Type-A proxy (rules actually surfaced/used) for the PRD's
+// aspirational Type-C (user-perceived) metric, which is not directly measurable.
+func (s *Server) computeHitRate(activeRules int) map[string]any {
+	distinct7d, _ := s.eventRepo.DistinctHitRulesLastDays(7)
+	hitsThisWeek, _ := s.eventRepo.CountRuleHitsLastDays(7)
+	hitsLast14, _ := s.eventRepo.CountRuleHitsLastDays(14)
+	// last-week = hits in [7,14) days = (last 14) − (last 7).
+	hitsLastWeek := hitsLast14 - hitsThisWeek
+	if hitsLastWeek < 0 {
+		hitsLastWeek = 0
+	}
+
+	ratePct := 0
+	if activeRules > 0 {
+		ratePct = distinct7d * 100 / activeRules
+	}
+
+	trend := "equal"
+	switch {
+	case hitsThisWeek > hitsLastWeek:
+		trend = "up"
+	case hitsThisWeek < hitsLastWeek:
+		trend = "down"
+	}
+
+	// low-hit = active rules not surfaced at all in the last week.
+	lowHit := 0
+	if activeRules > 0 {
+		lowHit = activeRules - distinct7d
+		if lowHit < 0 {
+			lowHit = 0
+		}
+	}
+
+	lastHit := map[string]any(nil)
+	if latest, err := s.eventRepo.LatestRuleHit(); err == nil && latest != nil {
+		entry := map[string]any{
+			"rule_id":    latest.RuleID,
+			"agent_name": latest.AgentName,
+			"timestamp":  latest.Timestamp,
+		}
+		if rule, err := s.ruleRepo.GetByID(latest.RuleID); err == nil && rule != nil {
+			entry["content"] = rule.Content
+		}
+		lastHit = entry
+	}
+
+	return map[string]any{
+		"active_rules":            activeRules,
+		"distinct_hit_rules_7d":   distinct7d,
+		"hit_rate_pct":            ratePct,
+		"hits_this_week":          hitsThisWeek,
+		"hits_last_week":          hitsLastWeek,
+		"trend":                   trend,
+		"low_hit_count":           lowHit,
+		"last_hit":                lastHit,
+	}
+}
+
+// getHitRate returns the hit-rate summary (SHADOW-041).
+func (s *Server) getHitRate(w http.ResponseWriter, r *http.Request) {
+	active, _ := s.ruleRepo.Count(storage.RuleFilter{Status: "active"})
+	writeJSON(w, http.StatusOK, s.computeHitRate(active))
 }
 
 // getDashboardMap powers the Memory Map canvas (web/src/pages/MemoryMapPage).
