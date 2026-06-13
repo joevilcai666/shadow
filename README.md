@@ -112,6 +112,17 @@ brew tap joevilcai666/shadow
 brew install --formula joevilcai666/shadow/shadow
 ```
 
+Upgrade to the latest version:
+
+```bash
+brew update
+brew upgrade joevilcai666/shadow/shadow
+```
+
+> **Note:** Always use the fully-qualified name `joevilcai666/shadow/shadow` (or the
+> `--formula` flag). A bare `shadow` collides with an unrelated Homebrew **cask** and
+> will fail with `Cask 'shadow' is not installed`.
+
 ### Binary Download
 
 Download the latest archive for your platform from
