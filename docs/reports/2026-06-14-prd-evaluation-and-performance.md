@@ -95,6 +95,12 @@ and the dashboard hit-rate summary.
   context directories and scans them once before adapter cleanup, avoiding
   repeated removal attempts when the current directory is also under a common
   development root.
+- Onboarding agent detection now includes OpenClaw via the `openclaw` executable
+  or `~/.openclaw`, matching the adapter selection UI and native `OPENCLAW.md`
+  output contract.
+- Windows IPC tests now use unique named pipe paths, eliminating fixed-name
+  collisions that made the full verification suite intermittently fail with
+  access-denied pipe errors.
 
 ## Performance Changes In This Pass
 
@@ -126,6 +132,8 @@ Run after this pass:
 - `go test ./internal/server -run TestLocalhostOnlyAcceptsLoopbackHostsWithoutPorts -count=1`
 - `go test ./internal/distill -run TestProcessExplicitSignalMergesSimilarExistingCandidate -count=1`
 - `go test ./cmd/shadow -run TestFindProjectContextsDeduplicatesCurrentDirectory -count=1`
+- `go test ./internal/daemon -run TestDetectAgentsIncludesOpenClaw -count=1`
+- `go test ./internal/daemon -run TestSocketIPC -count=1`
 - Browser smoke against `http://127.0.0.1:7878/`: dashboard rendered
   Shadow console content and browser error logs were empty.
 

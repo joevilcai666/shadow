@@ -133,6 +133,28 @@ func TestOnboardingIncludesOpenClawTarget(t *testing.T) {
 	}
 }
 
+func TestDetectAgentsIncludesOpenClaw(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("PATH", t.TempDir())
+	if err := os.MkdirAll(filepath.Join(home, ".openclaw"), 0755); err != nil {
+		t.Fatalf("mkdir openclaw sentinel: %v", err)
+	}
+
+	msg := detectAgents()()
+	detected, ok := msg.(agentDetectMsg)
+	if !ok {
+		t.Fatalf("detectAgents returned %T, want agentDetectMsg", msg)
+	}
+	for _, agent := range detected.agents {
+		if agent == "OpenClaw" {
+			return
+		}
+	}
+	t.Fatalf("detected agents = %#v, want OpenClaw", detected.agents)
+}
+
 func TestOnboardingScanScopesRulesAndSelectedAgentsToCurrentProject(t *testing.T) {
 	cwd := t.TempDir()
 	if err := os.WriteFile(filepath.Join(cwd, "go.mod"), []byte("module example.com/shadow-test"), 0644); err != nil {
@@ -385,7 +407,7 @@ func TestSocketIPC(t *testing.T) {
 
 	var sockPath string
 	if runtime.GOOS == "windows" {
-		sockPath = `\\.\pipe\shadow-test-` + strings.ReplaceAll(t.Name(), "/", "-")
+		sockPath = `\\.\pipe\shadow-test-` + storage.NewID()
 	} else {
 		sockPath = filepath.Join(dir, "test.sock")
 	}

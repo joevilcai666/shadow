@@ -363,6 +363,13 @@ func detectAgents() tea.Cmd {
 			agents = append(agents, "Codex")
 		}
 
+		// Detect OpenClaw.
+		if _, err := exec.LookPath("openclaw"); err == nil {
+			agents = append(agents, "OpenClaw")
+		} else if _, err := os.Stat(filepath.Join(home, ".openclaw")); err == nil {
+			agents = append(agents, "OpenClaw")
+		}
+
 		return agentDetectMsg{agents: agents}
 	}
 }
