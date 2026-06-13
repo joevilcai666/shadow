@@ -106,3 +106,48 @@ func scanUserMemory(row *sql.Row) (*UserMemory, error) {
 	}
 	return &m, nil
 }
+
+// UserMemoriesAsRules converts always-active user memories into transient rule
+// entries for agent context-file rendering. It does not persist anything in the
+// rules table.
+func UserMemoriesAsRules(memories []*UserMemory) (global []*Rule, byProject map[string][]*Rule) {
+	byProject = map[string][]*Rule{}
+	for _, memory := range memories {
+		rule := userMemoryAsRule(memory)
+		if rule == nil {
+			continue
+		}
+		if memory.ProjectPath == "" {
+			global = append(global, rule)
+			continue
+		}
+		byProject[memory.ProjectPath] = append(byProject[memory.ProjectPath], rule)
+	}
+	return global, byProject
+}
+
+func userMemoryAsRule(memory *UserMemory) *Rule {
+	if memory == nil || memory.Content == "" {
+		return nil
+	}
+	scope := "global"
+	if memory.ProjectPath != "" {
+		scope = "project"
+	}
+	return &Rule{
+		ID:             "memory:" + memory.ID,
+		Content:        memory.Content,
+		Scope:          scope,
+		ProjectPath:    memory.ProjectPath,
+		Tags:           append([]string(nil), memory.Tags...),
+		Category:       memory.Category,
+		TriggerContext: "user memory",
+		Confidence:     1.0,
+		Status:         "active",
+		Version:        1,
+		Importance:     1.0,
+		Author:         "user",
+		CreatedAt:      memory.CreatedAt,
+		UpdatedAt:      memory.UpdatedAt,
+	}
+}

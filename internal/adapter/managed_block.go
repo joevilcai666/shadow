@@ -40,6 +40,7 @@ type RuleEntry struct {
 	Content        string
 	Scope          string
 	Tags           []string
+	Category       string
 	TriggerContext string
 	Confidence     float64
 	Version        int
@@ -244,6 +245,9 @@ func (mb *ManagedBlock) formatBlock(rules []RuleEntry) string {
 		}
 		if len(r.Tags) > 0 {
 			lines = append(lines, fmt.Sprintf("%s Tags: %s", mb.commentPrefix, strings.Join(r.Tags, ", ")))
+		}
+		if r.Category != "" {
+			lines = append(lines, fmt.Sprintf("%s Category: %s", mb.commentPrefix, r.Category))
 		}
 		if r.TriggerContext != "" {
 			lines = append(lines, fmt.Sprintf("%s Trigger: %s", mb.commentPrefix, r.TriggerContext))

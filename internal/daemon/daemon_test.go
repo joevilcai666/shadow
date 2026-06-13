@@ -315,6 +315,70 @@ func TestSyncAdaptersRecordsEffectivenessEvents(t *testing.T) {
 	}
 }
 
+func TestSyncAdaptersIncludesUserMemories(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "shadow.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	projectPath := filepath.Join(dir, "repo")
+	if err := storage.NewProjectRepo(db).Create(&storage.Project{
+		ID:        storage.NewID(),
+		Path:      projectPath,
+		Name:      "repo",
+		Agents:    []string{"Codex"},
+		CreatedAt: storage.Now(),
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := storage.NewUserMemoryRepo(db).Create(&storage.UserMemory{
+		ID:        storage.NewID(),
+		UserID:    "local",
+		Content:   "Always use Conventional Commits",
+		Category:  "convention",
+		Tags:      []string{"git"},
+		CreatedAt: storage.Now(),
+		UpdatedAt: storage.Now(),
+	}); err != nil {
+		t.Fatalf("create memory: %v", err)
+	}
+
+	cfgMgr := config.NewManager(dir)
+	if err := cfgMgr.LoadGlobal(); err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if err := cfgMgr.UpdateGlobal(func(cfg *config.Config) {
+		cfg.Adapters.Codex.Enabled = true
+	}); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	codex := &fakeAdapter{name: "codex", installed: true}
+	d := &Daemon{
+		state:     StateIdle,
+		db:        db,
+		configMgr: cfgMgr,
+		adapters:  []adapter.Adapter{codex},
+	}
+
+	d.syncAdapters()
+
+	found := false
+	for _, rules := range codex.writeRules {
+		for _, rule := range rules {
+			if rule.Content == "Always use Conventional Commits" && rule.Category == "convention" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("synced rules = %#v, want user memory as context entry", codex.writeRules)
+	}
+}
+
 func TestSocketIPC(t *testing.T) {
 	dir := t.TempDir()
 	d, _ := New(Config{Version: "0.1.0", HomeDir: dir})
@@ -444,18 +508,20 @@ func containsSubstr(s, substr string) bool {
 }
 
 type fakeAdapter struct {
-	name      string
-	installed bool
-	writes    []string
-	removes   []string
+	name       string
+	installed  bool
+	writes     []string
+	writeRules [][]*storage.Rule
+	removes    []string
 }
 
 func (f *fakeAdapter) Name() string { return f.name }
 
 func (f *fakeAdapter) IsInstalled() bool { return f.installed }
 
-func (f *fakeAdapter) WriteRules(_ []*storage.Rule, scope, projectPath string) error {
+func (f *fakeAdapter) WriteRules(rules []*storage.Rule, scope, projectPath string) error {
 	f.writes = append(f.writes, scope+":"+projectPath)
+	f.writeRules = append(f.writeRules, append([]*storage.Rule(nil), rules...))
 	return nil
 }
 

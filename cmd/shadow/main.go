@@ -540,6 +540,12 @@ func runSync(opts syncOptions) error {
 	if err != nil {
 		return fmt.Errorf("list project rules: %w", err)
 	}
+	memories, err := storage.NewUserMemoryRepo(db).List("local", "")
+	if err != nil {
+		return fmt.Errorf("list user memories: %w", err)
+	}
+	globalMemoryRules, projectMemoryRulesByPath := storage.UserMemoriesAsRules(memories)
+	globalRules = append(globalRules, globalMemoryRules...)
 
 	backupDir := filepath.Join(opts.homeDir, "backups")
 	adapters := []adapter.Adapter{
@@ -576,7 +582,9 @@ func runSync(opts syncOptions) error {
 			if !projectIncludesAgent(p, a.Name()) {
 				continue
 			}
-			projectRules := projectRulesByPath[p.Path]
+			projectRules := append([]*storage.Rule{}, globalMemoryRules...)
+			projectRules = append(projectRules, projectMemoryRulesByPath[p.Path]...)
+			projectRules = append(projectRules, projectRulesByPath[p.Path]...)
 			if len(projectRules) == 0 {
 				continue
 			}

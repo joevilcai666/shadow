@@ -542,6 +542,13 @@ func (d *Daemon) syncAdapters() {
 		slog.Warn("adapter sync: fetch project rules", "error", err)
 		return
 	}
+	memories, err := storage.NewUserMemoryRepo(d.db).List("local", "")
+	if err != nil {
+		slog.Warn("adapter sync: fetch user memories", "error", err)
+		return
+	}
+	globalMemoryRules, projectMemoryRulesByPath := storage.UserMemoriesAsRules(memories)
+	globalRules = append(globalRules, globalMemoryRules...)
 
 	// Don't sync if daemon is stopping.
 	if d.GetState() == StateStopping {
@@ -577,7 +584,9 @@ func (d *Daemon) syncAdapters() {
 
 		// Write project-specific rules.
 		for _, p := range projects {
-			projectRules := projectRulesByPath[p.Path]
+			projectRules := append([]*storage.Rule{}, globalMemoryRules...)
+			projectRules = append(projectRules, projectMemoryRulesByPath[p.Path]...)
+			projectRules = append(projectRules, projectRulesByPath[p.Path]...)
 			if len(projectRules) > 0 {
 				if err := a.WriteRules(projectRules, "project", p.Path); err != nil {
 					slog.Warn("adapter sync: write project rules", "adapter", a.Name(), "project", p.Name, "error", err)

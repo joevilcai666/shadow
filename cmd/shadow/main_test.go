@@ -127,3 +127,61 @@ func TestRunSyncWritesOnlyRegisteredProjectAgents(t *testing.T) {
 		t.Fatalf("sync should not write unregistered Claude target, stat err = %v", err)
 	}
 }
+
+func TestRunSyncWritesUserMemoriesToRegisteredAgentContext(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	projectPath := filepath.Join(dir, "repo")
+	if err := os.MkdirAll(projectPath, 0755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+
+	dbPath := filepath.Join(home, ".shadow", "shadow.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	if err := storage.NewProjectRepo(db).Create(&storage.Project{
+		ID:        storage.NewID(),
+		Path:      projectPath,
+		Name:      "repo",
+		Agents:    []string{"Codex"},
+		CreatedAt: storage.Now(),
+	}); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	if err := storage.NewUserMemoryRepo(db).Create(&storage.UserMemory{
+		ID:        storage.NewID(),
+		UserID:    "local",
+		Content:   "Always use Conventional Commits",
+		Category:  "convention",
+		Tags:      []string{"git"},
+		CreatedAt: storage.Now(),
+		UpdatedAt: storage.Now(),
+	}); err != nil {
+		t.Fatalf("create memory: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := runSync(syncOptions{
+		homeDir: home,
+		dbPath:  dbPath,
+		out:     &out,
+	}); err != nil {
+		t.Fatalf("run sync: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(projectPath, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	text := string(content)
+	if !strings.Contains(text, "Always use Conventional Commits") {
+		t.Fatalf("AGENTS.md = %q, want user memory content", text)
+	}
+	if !strings.Contains(text, "Category: convention") {
+		t.Fatalf("AGENTS.md = %q, want memory category metadata", text)
+	}
+}

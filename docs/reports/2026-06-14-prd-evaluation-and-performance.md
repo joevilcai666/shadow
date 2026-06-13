@@ -22,7 +22,7 @@ and the dashboard hit-rate summary.
 | Capture | Implemented for core MVP paths | Claude Code, Codex, Cursor parsers, git hook signal ingestion, privacy filtering |
 | Distill / crystallization | Implemented and wired | daemon starts a periodic distill loop, explicit signals become candidate rules |
 | Rule storage | Implemented | SQLite rules, sources, versions, events, projects, user memories |
-| Cross-agent output | Implemented | Claude Code, Cursor, Codex, OpenClaw, and Copilot adapters with managed-block writes and visible rule metadata |
+| Cross-agent output | Implemented | Claude Code, Cursor, Codex, OpenClaw, and Copilot adapters with managed-block writes for rules and user memories |
 | Safe sync preview | Implemented | `shadow sync --dry-run` reports adapter targets and pending managed-block changes without writing files |
 | Review flow | Implemented | `shadow review`, `/api/rules?status=candidate`, batch approve/reject |
 | Rule management UI/API | Implemented | CRUD, timeline, events, versions, rollback, config, adapters, conflicts |
@@ -61,6 +61,9 @@ and the dashboard hit-rate summary.
 - Added rule metadata to managed agent context blocks: scope, tags, trigger
   context, confidence, version, and rule id are now visible alongside the rule
   text, matching the Shadow_qt real-agent interop evidence format more closely.
+- Synced user memories into agent context files as always-active local context,
+  so `shadow store-memory` now matches its "shared across all agents" promise
+  instead of only storing/exporting the memory.
 
 ## Performance Changes In This Pass
 

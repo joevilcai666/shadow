@@ -223,6 +223,7 @@ func rulesToEntries(rules []*storage.Rule) []RuleEntry {
 				Content:        r.Content,
 				Scope:          r.Scope,
 				Tags:           append([]string(nil), r.Tags...),
+				Category:       r.Category,
 				TriggerContext: r.TriggerContext,
 				Confidence:     r.Confidence,
 				Version:        r.Version,
