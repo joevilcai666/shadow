@@ -68,9 +68,9 @@ func TestExtractRanksByTagThenRecencyAndCapsAtMaxRules(t *testing.T) {
 
 	ctx, err := engine.Extract(TaskContextRequest{
 		TaskDescription: "fix the auth login bug",
-		ProjectPath:    "/tmp/proj",
-		Tags:           []string{"auth"},
-		MaxRules:       2,
+		ProjectPath:     "/tmp/proj",
+		Tags:            []string{"auth"},
+		MaxRules:        2,
 	})
 	if err != nil {
 		t.Fatalf("extract: %v", err)
@@ -116,7 +116,7 @@ func TestExtractRespectsMaxRulesDefault(t *testing.T) {
 	}
 	ctx, err := engine.Extract(TaskContextRequest{
 		TaskDescription: "anything",
-		ProjectPath:    "/tmp/proj",
+		ProjectPath:     "/tmp/proj",
 		// MaxRules left 0 → defaults to 5.
 	})
 	if err != nil {
@@ -127,6 +127,28 @@ func TestExtractRespectsMaxRulesDefault(t *testing.T) {
 	}
 	if ctx.TotalFound != 7 {
 		t.Errorf("TotalFound = %d, want 7", ctx.TotalFound)
+	}
+}
+
+func TestExtractKeepsStableOrderForEqualScores(t *testing.T) {
+	engine, repo := testContextEngine(t)
+	for _, content := range []string{"first equal rule", "second equal rule", "third equal rule"} {
+		mustCreateRule(t, repo, &storage.Rule{
+			Content: content, Scope: "global", Confidence: 0.5, DecayScore: 0.5,
+		})
+	}
+
+	ctx, err := engine.Extract(TaskContextRequest{
+		TaskDescription: "anything",
+		MaxRules:        3,
+	})
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	for i, want := range []string{"first equal rule", "second equal rule", "third equal rule"} {
+		if ctx.Rules[i].Content != want {
+			t.Fatalf("rank %d = %q, want %q", i+1, ctx.Rules[i].Content, want)
+		}
 	}
 }
 
@@ -141,9 +163,9 @@ func TestExtractEmptyWhenNothingMatches(t *testing.T) {
 	})
 	ctx, err := engine.Extract(TaskContextRequest{
 		TaskDescription: "unrelated task",
-		ProjectPath:    "/tmp/proj",
-		Tags:           []string{"nonexistent"},
-		MaxRules:       5,
+		ProjectPath:     "/tmp/proj",
+		Tags:            []string{"nonexistent"},
+		MaxRules:        5,
 	})
 	if err != nil {
 		t.Fatalf("extract: %v", err)

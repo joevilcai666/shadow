@@ -2,6 +2,7 @@ package distill
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/joevilcai666/shadow/internal/storage"
@@ -64,14 +65,9 @@ func (e *ContextEngine) Extract(req TaskContextRequest) (*ExtractedContext, erro
 		}
 	}
 
-	// Sort by score descending (simple bubble sort, small list).
-	for i := 0; i < len(scored)-1; i++ {
-		for j := i + 1; j < len(scored); j++ {
-			if scored[j].score > scored[i].score {
-				scored[i], scored[j] = scored[j], scored[i]
-			}
-		}
-	}
+	sort.SliceStable(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
 
 	// Apply limit.
 	result := &ExtractedContext{

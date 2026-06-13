@@ -72,6 +72,8 @@ and the dashboard hit-rate summary.
   node so a shared tag cannot produce an explosive complete graph.
 - Adapter sync now loads active project rules once and groups them by project
   path, avoiding a repeated project-rule query for every adapter/project pair.
+- Task context extraction now uses stable O(n log n) ranking instead of a
+  hand-written O(n^2) sort while preserving equal-score rule order.
 - The React memory map computes layout in a Web Worker and defaults to a reduced
   edge density so initial render prioritizes signal and structure edges.
 - Embedded static assets were rebuilt from a clean `web/dist`, removing stale
