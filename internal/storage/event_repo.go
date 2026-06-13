@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"time"
 )
 
 // EventRepo stores effectiveness events: rule hits and adapter sync outcomes.
@@ -106,6 +107,60 @@ func (r *EventRepo) LatestByAgentEvent(agentName, eventType string) (*Event, err
 		WHERE agent_name = ? AND event_type = ?
 		ORDER BY timestamp DESC, id DESC
 		LIMIT 1`, agentName, eventType)
+	event, err := scanEvent(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return event, err
+}
+
+// MARK: - Hit-rate aggregation (SHADOW-041)
+//
+// These power the /api/stats/hit-rate endpoint. "Hit rate" is defined as the
+// share of active rules that were surfaced/used at least once in the window —
+// a Type-A proxy for the PRD's aspirational Type-C (user-perceived) metric.
+
+// daysAgoRFC3339 returns an RFC3339 UTC timestamp N days in the past. Both
+// stored event timestamps and these cutoffs use RFC3339, so SQL string
+// comparisons are format-consistent (avoids SQLite datetime() vs RFC3339
+// mismatches).
+func daysAgoRFC3339(days int) string {
+	return time.Now().UTC().AddDate(0, 0, -days).Format(time.RFC3339)
+}
+
+// CountRuleHitsLastDays returns the number of rule_hit events in the last `days` days.
+// Use subtraction for ranges: hits in [7,14) days = CountRuleHitsLastDays(14) - CountRuleHitsLastDays(7).
+// (A single lower bound avoids RFC3339 same-second boundary issues that an
+// exclusive upper bound would hit.)
+func (r *EventRepo) CountRuleHitsLastDays(days int) (int, error) {
+	var count int
+	err := r.db.QueryRow(`
+		SELECT COUNT(*) FROM events
+		WHERE event_type = 'rule_hit' AND datetime(timestamp) >= datetime(?)`,
+		daysAgoRFC3339(days)).Scan(&count)
+	return count, err
+}
+
+// DistinctHitRulesLastDays returns the count of distinct rule_ids hit in the last `days` days.
+func (r *EventRepo) DistinctHitRulesLastDays(days int) (int, error) {
+	var count int
+	err := r.db.QueryRow(`
+		SELECT COUNT(DISTINCT rule_id) FROM events
+		WHERE event_type = 'rule_hit' AND rule_id IS NOT NULL AND rule_id != ''
+		  AND datetime(timestamp) >= datetime(?)`,
+		daysAgoRFC3339(days)).Scan(&count)
+	return count, err
+}
+
+// LatestRuleHit returns the most recent rule_hit event across all agents, or nil if none.
+func (r *EventRepo) LatestRuleHit() (*Event, error) {
+	row := r.db.QueryRow(`
+		SELECT id, rule_id, event_type, COALESCE(agent_name,''), COALESCE(project_path,''),
+		       COALESCE(target_path,''), COALESCE(details,''), timestamp
+		FROM events
+		WHERE event_type = 'rule_hit'
+		ORDER BY timestamp DESC, id DESC
+		LIMIT 1`)
 	event, err := scanEvent(row)
 	if err == sql.ErrNoRows {
 		return nil, nil

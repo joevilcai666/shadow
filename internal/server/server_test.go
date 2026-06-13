@@ -51,6 +51,7 @@ func testEnvWithDir(t *testing.T) (*Server, *sql.DB, string) {
 		storage.NewVersionRepo(db),
 		storage.NewConfigRepo(db),
 		storage.NewProjectRepo(db),
+		storage.NewUserMemoryRepo(db),
 		cfgMgr,
 		config.ServerConfig{Port: 7878, Bind: "127.0.0.1"},
 		adapter.NewMCPServer(storage.NewRuleRepo(db)),
@@ -824,4 +825,149 @@ func TestWebSocketBroadcastDropsSlowClient(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Error("slow client should have been unregistered after a dropped broadcast")
+}
+
+// MARK: - User memories (SHADOW-038)
+
+func TestCreateAndListMemories(t *testing.T) {
+	s, _ := testEnv(t)
+
+	// Create a valid memory.
+	payload, _ := json.Marshal(map[string]any{
+		"content":  "I prefer Conventional Commits",
+		"category": "convention",
+		"tags":     []string{"git"},
+	})
+	req := newLocalRequest("POST", "/api/memories", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create status: got %d, want %d. body: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+	var created storage.UserMemory
+	json.NewDecoder(w.Body).Decode(&created)
+	if created.ID == "" || created.UserID != "local" {
+		t.Errorf("created = %#v, want id set and user_id=local", created)
+	}
+
+	// List returns it.
+	req = newLocalRequest("GET", "/api/memories", nil)
+	w = httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list status: %d", w.Code)
+	}
+	var list []*storage.UserMemory
+	json.NewDecoder(w.Body).Decode(&list)
+	if len(list) != 1 || list[0].ID != created.ID {
+		t.Errorf("list = %#v, want 1 memory with id %s", list, created.ID)
+	}
+
+	// Delete it.
+	req = newLocalRequest("DELETE", "/api/memories/"+created.ID, nil)
+	w = httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete status: %d", w.Code)
+	}
+}
+
+func TestCreateMemoryRejectsBadCategory(t *testing.T) {
+	s, _ := testEnv(t)
+	payload, _ := json.Marshal(map[string]any{
+		"content":  "x",
+		"category": "nonsense",
+	})
+	req := newLocalRequest("POST", "/api/memories", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want 400 for bad category. body: %s", w.Code, w.Body.String())
+	}
+}
+
+// MARK: - Hit rate (SHADOW-041)
+
+func TestRecordRuleHitRefreshesDecay(t *testing.T) {
+	s, db := testEnv(t)
+	ruleRepo := storage.NewRuleRepo(db)
+
+	rule := &storage.Rule{
+		ID: storage.NewID(), Content: "Use pnpm", Scope: "global",
+		Confidence: 0.9, Status: "active", Version: 1,
+		CreatedAt: storage.Now(), UpdatedAt: storage.Now(),
+	}
+	if err := ruleRepo.Create(rule); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-condition: no last hit.
+	before, _ := ruleRepo.GetByID(rule.ID)
+	if before.LastHitAt != "" {
+		t.Fatalf("pre-hit last_hit_at = %q, want empty", before.LastHitAt)
+	}
+
+	body, _ := json.Marshal(map[string]any{"agent_name": "claude-code"})
+	req := newLocalRequest("POST", "/api/rules/"+rule.ID+"/hit", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("hit status: %d body: %s", w.Code, w.Body.String())
+	}
+
+	after, _ := ruleRepo.GetByID(rule.ID)
+	if after.LastHitAt == "" {
+		t.Error("post-hit last_hit_at empty; recordRuleHit should refresh it")
+	}
+	if after.DecayScore < rule.Confidence*0.99 {
+		t.Errorf("post-hit decay_score = %f, want ~%f (hit restores confidence)", after.DecayScore, rule.Confidence)
+	}
+}
+
+func TestGetHitRate(t *testing.T) {
+	s, db := testEnv(t)
+	ruleRepo := storage.NewRuleRepo(db)
+	eventRepo := storage.NewEventRepo(db)
+
+	// Empty state: 0 active rules → rate 0.
+	req := newLocalRequest("GET", "/api/stats/hit-rate", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: %d", w.Code)
+	}
+	var empty map[string]any
+	json.NewDecoder(w.Body).Decode(&empty)
+	if empty["hit_rate_pct"].(float64) != 0 {
+		t.Errorf("empty rate = %v, want 0", empty["hit_rate_pct"])
+	}
+
+	// Two active rules; hit one of them this week.
+	r1 := &storage.Rule{ID: storage.NewID(), Content: "r1", Scope: "global", Status: "active", Version: 1, CreatedAt: storage.Now(), UpdatedAt: storage.Now()}
+	r2 := &storage.Rule{ID: storage.NewID(), Content: "r2", Scope: "global", Status: "active", Version: 1, CreatedAt: storage.Now(), UpdatedAt: storage.Now()}
+	ruleRepo.Create(r1)
+	ruleRepo.Create(r2)
+	eventRepo.Create(&storage.Event{ID: storage.NewID(), RuleID: r1.ID, EventType: "rule_hit", AgentName: "claude-code", Timestamp: storage.Now()})
+
+	req = newLocalRequest("GET", "/api/stats/hit-rate", nil)
+	w = httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	var hr map[string]any
+	json.NewDecoder(w.Body).Decode(&hr)
+	// 1 distinct hit / 2 active = 50%.
+	if hr["hit_rate_pct"].(float64) != 50 {
+		t.Errorf("hit_rate_pct = %v, want 50", hr["hit_rate_pct"])
+	}
+	if hr["distinct_hit_rules_7d"].(float64) != 1 {
+		t.Errorf("distinct_7d = %v, want 1", hr["distinct_hit_rules_7d"])
+	}
+	if hr["low_hit_count"].(float64) != 1 {
+		t.Errorf("low_hit_count = %v, want 1 (r2 unhit)", hr["low_hit_count"])
+	}
+	last, _ := hr["last_hit"].(map[string]any)
+	if last == nil || last["content"] != "r1" {
+		t.Errorf("last_hit = %#v, want content r1", last)
+	}
 }

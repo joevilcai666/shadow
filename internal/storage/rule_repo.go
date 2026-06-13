@@ -145,6 +145,20 @@ func (r *RuleRepo) Delete(id string) error {
 	return nil
 }
 
+// TouchHit refreshes a rule's last_hit_at and decay_score after a hit.
+// It is intentionally lightweight: a hit is not an edit, so no version
+// snapshot is created (avoids version-table churn). Callers compute the
+// new decay score via ComputeDecayScore(confidence, lastHitAt). (SHADOW-041)
+func (r *RuleRepo) TouchHit(id, lastHitAt string, decayScore float64) error {
+	_, err := r.db.Exec(`
+		UPDATE rules SET last_hit_at = ?, decay_score = ?, updated_at = datetime('now')
+		WHERE id = ?`, lastHitAt, decayScore, id)
+	if err != nil {
+		return fmt.Errorf("touch hit: %w", err)
+	}
+	return nil
+}
+
 // List returns rules matching the given filter.
 func (r *RuleRepo) List(filter RuleFilter) ([]*Rule, error) {
 	query, args := buildRuleQuery(filter)
