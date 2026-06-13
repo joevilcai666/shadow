@@ -1,17 +1,15 @@
 // 记忆地图页面入口
 // 拉取后端 /api/dashboard/map 的真数据，传给 MemoryMap 组件；
-// 当数据 < 3 条时，混入 mock 让首次打开就有视觉冲击（PRD §5.7 示例数据模式）。
+// 没有真实数据时才展示示例；有任何真实规则时，证据链必须完全来自后端。
 
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MemoryMap } from '../memory-map/MemoryMap';
-import { MOCK_NODES } from '../memory-map/mockData';
+import { MOCK_NODES, MOCK_RELATIONS } from '../memory-map/mockData';
 import type { DashboardMapEdge } from '../lib/api';
 import { api } from '../lib/api';
 import { useRealtimeRefresh } from '../lib/realtime';
 import type { MemoryNodeData, MapStats, RelationData } from '../memory-map/types';
-
-const SEED_THRESHOLD = 3; // 真数据少于这个数 → 补 mock
 
 export default function MemoryMapPage() {
   const navigate = useNavigate();
@@ -28,27 +26,19 @@ export default function MemoryMapPage() {
         api.getDashboard(),
       ]);
 
-      // Backfill with mock seeds when the user has fewer than 3 rules,
-      // so the canvas has something to render on first open (PRD §5.7).
-      let realNodes = (map.nodes ?? []) as MemoryNodeData[];
-      if (realNodes.length < SEED_THRESHOLD) {
-        const existing = new Set(realNodes.map(n => n.id));
-        const seeded = MOCK_NODES.filter(n => !existing.has(n.id)).slice(
-          0,
-          SEED_THRESHOLD - realNodes.length,
-        );
-        realNodes = [...realNodes, ...seeded];
-      }
+      const realNodes = (map.nodes ?? []) as MemoryNodeData[];
+      const nodesForCanvas = realNodes.length > 0 ? realNodes : MOCK_NODES;
 
       // Translate backend edge shape (source/target + data) into the
       // shape MemoryMap's relations prop expects.
-      const rels = (map.edges ?? []).map((e: DashboardMapEdge) => ({
+      const realRelations = (map.edges ?? []).map((e: DashboardMapEdge) => ({
         source: e.source,
         target: e.target,
         data: e.data as RelationData,
       }));
+      const rels = realNodes.length > 0 ? realRelations : MOCK_RELATIONS;
 
-      setNodes(realNodes);
+      setNodes(nodesForCanvas);
       setRelations(rels);
       setStats({
         total: dash.total_rules,

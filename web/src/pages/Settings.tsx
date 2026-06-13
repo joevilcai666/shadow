@@ -75,6 +75,7 @@ export default function Settings() {
   const threshold = config?.distill.threshold ?? 'medium';
   const batchMode = config?.distill.batch_mode ?? false;
   const thresholdLabel = threshold === 'low' ? 'Low (1 signal)' : threshold === 'high' ? 'High (5 signals)' : 'Medium (2 signals)';
+  const formatTime = (value: string) => value ? new Date(value).toLocaleString() : 'Never';
 
   return (
     <div className="p-8 max-w-3xl">
@@ -146,6 +147,14 @@ export default function Settings() {
                 <div>
                   <span className="text-sm">{adapter.label}</span>
                   <p className="text-xs text-gray-600 font-mono mt-0.5">{adapter.target_path}</p>
+                  <div className="mt-2 grid gap-1 text-xs text-gray-500 sm:grid-cols-2">
+                    <span>Last sync: <span className="text-gray-300">{formatTime(adapter.last_sync_at)}</span></span>
+                    <span>Hits: <span className="text-gray-300">{adapter.hit_count}</span></span>
+                    <span>Managed block: <span className="text-gray-300">{adapter.managed_block_status}</span></span>
+                    {adapter.last_error && (
+                      <span className="text-red-300 sm:col-span-2">Last error: {adapter.last_error}</span>
+                    )}
+                  </div>
                 </div>
                 <div className="flex items-center gap-3">
                   {adapter.installed ? (

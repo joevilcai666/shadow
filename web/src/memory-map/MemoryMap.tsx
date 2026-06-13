@@ -45,9 +45,9 @@ export function MemoryMap({ onOpenInRules, nodes: propNodes, relations: propRela
   // (mock keeps the canvas renderable during local dev when the daemon
   // is offline / a brand-new user has fewer than the threshold of rules).
   const hasRealData = (propNodes?.length ?? 0) > 0;
-  const dataNodes = hasRealData ? propNodes! : MOCK_NODES;
-  const dataRelations = hasRealData ? propRelations! : MOCK_RELATIONS;
-  const dataStats = propStats ?? MOCK_STATS;
+  const dataNodes = useMemo(() => hasRealData ? propNodes! : MOCK_NODES, [hasRealData, propNodes]);
+  const dataRelations = useMemo(() => hasRealData ? (propRelations ?? []) : MOCK_RELATIONS, [hasRealData, propRelations]);
+  const dataStats = useMemo(() => propStats ?? MOCK_STATS, [propStats]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<MapFilters>({
     category: 'all',
@@ -61,7 +61,7 @@ export function MemoryMap({ onOpenInRules, nodes: propNodes, relations: propRela
   // 节点位置（持久化用户拖动）
   const initialLayout = useMemo(
     () => computeLayout(dataNodes, dataRelations.map(r => ({ source: r.source, target: r.target }))),
-    []
+    [dataNodes, dataRelations]
   );
   const [positions, setPositions] = useState<Record<string, { x: number; y: number }>>(initialLayout.positions);
 
@@ -82,7 +82,7 @@ export function MemoryMap({ onOpenInRules, nodes: propNodes, relations: propRela
         return true;
       }).map(n => n.id)
     );
-  }, [searchQuery, filters]);
+  }, [dataNodes, searchQuery, filters]);
 
   const isSearchingOrFiltering = searchQuery.trim() !== '' || filters.category !== 'all' || filters.status !== 'all';
 
@@ -195,7 +195,7 @@ export function MemoryMap({ onOpenInRules, nodes: propNodes, relations: propRela
         draggable: true,
       } as Node<MemoryNodeData & { pushOffsetX?: number; pushOffsetY?: number }>;
     });
-  }, [positions, pushOffsets, matches, isSearchingOrFiltering, selectedId, connectedToSelected]);
+  }, [dataNodes, positions, pushOffsets, matches, isSearchingOrFiltering, selectedId, connectedToSelected]);
 
   // 构建 React Flow edges
   const edges: Edge<RelationData>[] = useMemo(() => {
@@ -288,7 +288,7 @@ export function MemoryMap({ onOpenInRules, nodes: propNodes, relations: propRela
 
   const selectedNode = useMemo(
     () => dataNodes.find(n => n.id === selectedId) ?? null,
-    [selectedId]
+    [dataNodes, selectedId]
   );
 
   return (

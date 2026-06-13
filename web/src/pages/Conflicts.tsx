@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, type Rule } from '../lib/api';
+import { api, type ConflictPair as APIConflictPair, type Rule } from '../lib/api';
 import { SkipForward } from 'lucide-react';
 import { Radio, RadioGroup } from '@heroui/react';
 import { LoadingState, ShadowButton, ShadowCard } from '../components/ui';
@@ -7,6 +7,8 @@ import { LoadingState, ShadowButton, ShadowCard } from '../components/ui';
 interface ConflictPair {
   ruleA: Rule;
   ruleB: Rule;
+  reason: string;
+  score: number;
 }
 
 export default function Conflicts() {
@@ -17,17 +19,14 @@ export default function Conflicts() {
   const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
-    api.listRules({ status: 'conflicted' })
-      .then(rules => {
-        const conflicted = rules || [];
-        // Pair up conflicts (simple: sequential pairs)
-        const pairs: ConflictPair[] = [];
-        for (let i = 0; i < conflicted.length; i += 2) {
-          if (i + 1 < conflicted.length) {
-            pairs.push({ ruleA: conflicted[i], ruleB: conflicted[i + 1] });
-          }
-        }
-        setConflicts(pairs);
+    api.listConflicts()
+      .then((pairs: APIConflictPair[]) => {
+        setConflicts((pairs || []).map(pair => ({
+          ruleA: pair.rule_a,
+          ruleB: pair.rule_b,
+          reason: pair.reason,
+          score: pair.score,
+        })));
       })
       .finally(() => setLoading(false));
   }, []);
@@ -87,7 +86,11 @@ export default function Conflicts() {
         <span className="text-sm text-gray-500">Conflict {currentIdx + 1} of {conflicts.length}</span>
       </div>
 
-      <p className="text-gray-400 mb-6">These two rules contradict each other. Choose how to resolve:</p>
+      <p className="text-gray-400 mb-2">These two rules contradict each other. Choose how to resolve:</p>
+      <ShadowCard className="mb-6 border-purple-500/30 bg-purple-500/10 p-4">
+        <p className="text-sm text-purple-300">{pair.reason}</p>
+        <p className="mt-1 text-xs text-purple-200/70">Relation confidence: {(pair.score * 100).toFixed(0)}%</p>
+      </ShadowCard>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
         {/* Rule A */}

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/joevilcai666/shadow/internal/adapter"
 	"github.com/joevilcai666/shadow/internal/config"
 	"github.com/joevilcai666/shadow/internal/storage"
 )
@@ -93,6 +94,20 @@ func TestCaptureToggle(t *testing.T) {
 	json.Unmarshal(data, &r1)
 	if r1["state"] != string(StateIdle) {
 		t.Errorf("after toggle off: got %q, want %q", r1["state"], StateIdle)
+	}
+}
+
+func TestOnboardingEnterFromWelcomeGoesToPrivacyStep(t *testing.T) {
+	m := NewOnboardingModel("test")
+
+	next, _ := m.handleEnter()
+	got := next.(OnboardingModel)
+
+	if got.step != 2 {
+		t.Fatalf("step = %d, want Privacy step 2", got.step)
+	}
+	if got.loading {
+		t.Fatal("welcome enter should not start daemon check loading")
 	}
 }
 
@@ -222,6 +237,59 @@ func TestSyncAdaptersRemovesDisabledAdapterBlocks(t *testing.T) {
 	}
 	if len(codex.writes) != 2 {
 		t.Errorf("enabled codex writes = %v, want global and project", codex.writes)
+	}
+}
+
+func TestSyncAdaptersRecordsEffectivenessEvents(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "shadow.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	rule := &storage.Rule{
+		ID: storage.NewID(), Content: "Use pnpm", Scope: "global",
+		Tags: []string{}, Confidence: 0.9, Status: "active", Version: 1,
+		CreatedAt: storage.Now(), UpdatedAt: storage.Now(),
+	}
+	if err := storage.NewRuleRepo(db).Create(rule); err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+
+	cfgMgr := config.NewManager(dir)
+	if err := cfgMgr.LoadGlobal(); err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if err := cfgMgr.UpdateGlobal(func(cfg *config.Config) {
+		cfg.Adapters.Codex.Enabled = true
+	}); err != nil {
+		t.Fatalf("update config: %v", err)
+	}
+
+	codex := &fakeAdapter{name: "codex", installed: true}
+	d := &Daemon{
+		state:     StateIdle,
+		db:        db,
+		configMgr: cfgMgr,
+		adapters:  []adapter.Adapter{codex},
+	}
+
+	d.syncAdapters()
+
+	latest, err := storage.NewEventRepo(db).LatestByAgentEvent("codex", "sync_success")
+	if err != nil {
+		t.Fatalf("latest sync event: %v", err)
+	}
+	if latest == nil {
+		t.Fatal("expected sync_success event")
+	}
+	if latest.TargetPath != "global:" {
+		t.Fatalf("target path = %q, want fake adapter global target", latest.TargetPath)
+	}
+	if latest.Details == "" {
+		t.Fatal("sync event should explain what happened")
 	}
 }
 

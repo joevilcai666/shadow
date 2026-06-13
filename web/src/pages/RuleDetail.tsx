@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { api, type Rule, type Source, type Version } from '../lib/api';
+import { api, type Event, type Rule, type Source, type Version } from '../lib/api';
 import { ArrowLeft, Edit3, RotateCcw, Save, X } from 'lucide-react';
 import { Card, TextArea } from '@heroui/react';
 import { LoadingState, ShadowButton, ShadowCard, StatusChip, TagChip } from '../components/ui';
@@ -10,6 +10,7 @@ export default function RuleDetail() {
   const navigate = useNavigate();
   const [rule, setRule] = useState<Rule | null>(null);
   const [sources, setSources] = useState<Source[]>([]);
+  const [events, setEvents] = useState<Event[]>([]);
   const [versions, setVersions] = useState<Version[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -21,10 +22,12 @@ export default function RuleDetail() {
     Promise.all([
       api.getRule(id),
       api.getTimeline(id).catch(() => []),
+      api.getEvents(id).catch(() => []),
       api.getVersions(id).catch(() => []),
-    ]).then(([r, s, v]) => {
+    ]).then(([r, s, e, v]) => {
       setRule(r);
       setSources(s || []);
+      setEvents(e || []);
       setVersions(v || []);
       setEditContent(r.content);
     }).finally(() => setLoading(false));
@@ -157,6 +160,30 @@ export default function RuleDetail() {
           <div className="mt-4 pt-4 border-t border-gray-800">
             <span className="text-gray-500 text-sm">Trigger Context:</span>
             <p className="text-sm mt-1 text-gray-300">{rule.trigger_context}</p>
+          </div>
+        )}
+      </ShadowCard>
+
+      {/* Effectiveness Events */}
+      <ShadowCard className="mb-6 p-6">
+        <h2 className="text-lg font-semibold mb-4">Effectiveness</h2>
+        {events.length === 0 ? (
+          <p className="text-sm text-gray-500">No hit or sync events recorded for this rule yet.</p>
+        ) : (
+          <div className="space-y-3">
+            {events.map(event => (
+              <div key={event.id} className="rounded-lg border border-gray-800 bg-gray-950 p-3 text-sm">
+                <div className="mb-1 flex flex-wrap items-center gap-2">
+                  <TagChip className={event.event_type === 'rule_hit' ? 'text-green-300' : 'text-purple-300'}>
+                    {event.event_type}
+                  </TagChip>
+                  {event.agent_name && <span className="text-xs text-gray-500">Agent: {event.agent_name}</span>}
+                  <span className="text-xs text-gray-500">{new Date(event.timestamp).toLocaleString()}</span>
+                </div>
+                {event.target_path && <p className="font-mono text-xs text-gray-400">{event.target_path}</p>}
+                {event.details && <p className="mt-1 text-xs text-gray-500">{event.details}</p>}
+              </div>
+            ))}
           </div>
         )}
       </ShadowCard>
