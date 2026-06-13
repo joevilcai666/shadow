@@ -3,10 +3,8 @@ package daemon
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net"
-	"os"
 )
 
 // CommandHandler processes IPC commands.
@@ -14,10 +12,12 @@ type CommandHandler interface {
 	HandleCommand(req IPCRequest) IPCResponse
 }
 
-// SocketServer listens on a Unix socket for IPC commands.
+// SocketServer listens on an IPC transport for commands.
+// The transport is platform-specific: Unix domain socket on !windows,
+// named pipe on windows (see socket_unix.go / socket_windows.go).
 type SocketServer struct {
-	path    string
-	handler CommandHandler
+	path     string
+	handler  CommandHandler
 	listener net.Listener
 }
 
@@ -29,32 +29,7 @@ func NewSocketServer(path string, handler CommandHandler) *SocketServer {
 	}
 }
 
-// Start begins listening for IPC connections.
-func (s *SocketServer) Start() error {
-	// Remove stale socket file.
-	os.Remove(s.path)
-
-	l, err := net.Listen("unix", s.path)
-	if err != nil {
-		return fmt.Errorf("listen on %s: %w", s.path, err)
-	}
-	s.listener = l
-
-	// Set socket file permissions.
-	os.Chmod(s.path, 0600)
-
-	go s.acceptLoop()
-	return nil
-}
-
-// Close shuts down the socket server.
-func (s *SocketServer) Close() {
-	if s.listener != nil {
-		s.listener.Close()
-	}
-	os.Remove(s.path)
-}
-
+// acceptLoop accepts connections in a loop and handles each in a goroutine.
 func (s *SocketServer) acceptLoop() {
 	for {
 		conn, err := s.listener.Accept()

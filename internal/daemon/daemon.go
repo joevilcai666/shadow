@@ -8,10 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/joevilcai666/shadow/internal/adapter"
@@ -73,7 +71,7 @@ func New(cfg Config) (*Daemon, error) {
 		state:    StateIdle,
 		version:  cfg.Version,
 		started:  time.Now().UTC(),
-		sockPath: filepath.Join(home, "shadow.sock"),
+		sockPath: ipcAddr(home),
 		pidPath:  filepath.Join(home, "shadow.pid"),
 		logDir:   filepath.Join(home, "logs"),
 		homeDir:  home,
@@ -101,7 +99,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 
 	// Write PID file.
-	if err := d.writePID(); err != nil {
+	if err := writePID(d); err != nil {
 		return fmt.Errorf("write pid: %w", err)
 	}
 	defer os.Remove(d.pidPath)
@@ -206,7 +204,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	// Handle signals.
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	registerSignals(sigCh)
 
 	for {
 		select {
@@ -214,14 +212,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 			slog.Info("daemon shutting down via context")
 			return d.shutdown()
 		case sig := <-sigCh:
-			switch sig {
-			case syscall.SIGTERM, syscall.SIGINT:
-				slog.Info("received shutdown signal", "signal", sig)
-				return d.shutdown()
-			case syscall.SIGHUP:
+			if isReloadSignal(sig) {
 				slog.Info("received reload signal")
 				d.handleReload()
+				continue
 			}
+			slog.Info("received shutdown signal", "signal", sig)
+			return d.shutdown()
 		case <-d.done:
 			return nil
 		}
@@ -309,10 +306,6 @@ func (d *Daemon) shutdown() error {
 func (d *Daemon) handleReload() {
 	slog.Info("reloading configuration")
 	// TODO: SHADOW-004 — reload config from disk
-}
-
-func (d *Daemon) writePID() error {
-	return os.WriteFile(d.pidPath, []byte(fmt.Sprintf("%d", os.Getpid())), 0644)
 }
 
 // StatusResponse is the JSON response for status queries.

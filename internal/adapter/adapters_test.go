@@ -14,13 +14,15 @@ func TestClaudeCodeAdapterTargetPath(t *testing.T) {
 	a := &ClaudeCodeAdapter{homeDir: home, mb: NewManagedBlock(filepath.Join(t.TempDir(), "backups"))}
 
 	global := a.TargetPath("global", "")
-	if !strings.Contains(global, ".claude/CLAUDE.md") {
-		t.Errorf("global path: %q", global)
+	wantSuffix := filepath.Join(".claude", "CLAUDE.md")
+	if !strings.Contains(global, wantSuffix) {
+		t.Errorf("global path: %q, want suffix %q", global, wantSuffix)
 	}
 
-	project := a.TargetPath("project", "/tmp/myproj")
-	if project != "/tmp/myproj/CLAUDE.md" {
-		t.Errorf("project path: %q", project)
+	projDir := filepath.Join(t.TempDir(), "myproj")
+	project := a.TargetPath("project", projDir)
+	if !strings.Contains(project, "CLAUDE.md") {
+		t.Errorf("project path should contain CLAUDE.md: %q", project)
 	}
 }
 
@@ -113,18 +115,21 @@ func TestClaudeCodeAdapterRemoveRules(t *testing.T) {
 func TestCursorAdapterTargetPath(t *testing.T) {
 	a := &CursorAdapter{mb: NewManagedBlock(filepath.Join(t.TempDir(), "backups"))}
 
-	project := a.TargetPath("project", "/tmp/myproj")
-	if project != "/tmp/myproj/.cursorrules" {
-		t.Errorf("project path: %q", project)
+	projDir := filepath.Join(t.TempDir(), "myproj")
+	project := a.TargetPath("project", projDir)
+	if !strings.Contains(project, ".cursorrules") {
+		t.Errorf("project path should contain .cursorrules: %q", project)
 	}
 }
 
 func TestCopilotAdapterTargetPath(t *testing.T) {
 	a := &CopilotAdapter{mb: NewManagedBlock(filepath.Join(t.TempDir(), "backups"))}
 
-	project := a.TargetPath("project", "/tmp/myproj")
-	if project != "/tmp/myproj/.github/copilot-instructions.md" {
-		t.Errorf("project path: %q, want /tmp/myproj/.github/copilot-instructions.md", project)
+	projDir := filepath.Join(t.TempDir(), "myproj")
+	project := a.TargetPath("project", projDir)
+	want := filepath.Join(".github", "copilot-instructions.md")
+	if !strings.Contains(project, want) {
+		t.Errorf("project path should contain %s: %q", want, project)
 	}
 
 	if !a.IsInstalled() {

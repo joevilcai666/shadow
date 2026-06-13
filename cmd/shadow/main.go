@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -55,6 +56,11 @@ var serveCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("create daemon: %w", err)
 		}
+
+		// On Windows, if running as a service, delegate to the SCM handler.
+		if runtime.GOOS == "windows" && daemon.IsWindowsService() {
+			return daemon.RunAsService(cmd.Context(), d)
+		}
 		return d.Run(cmd.Context())
 	},
 }
@@ -69,26 +75,14 @@ var startCmd = &cobra.Command{
 			return printStatus(client)
 		}
 
-		// Install launchd plist.
-		home, _ := os.UserHomeDir()
 		execPath, _ := os.Executable()
-		cfg := daemon.LaunchdConfig{
-			Label:      "com.shadow.daemon",
-			BinaryPath: execPath,
-			LogDir:     home + "/.shadow/logs",
-			HomeDir:    home + "/.shadow",
-		}
-		if err := daemon.InstallLaunchd(cfg); err != nil {
-			return fmt.Errorf("install launchd: %w", err)
-		}
-		fmt.Println("✓ Shadow daemon registered with launchd")
 
-		// Start via launchctl.
-		fmt.Println("Starting daemon...")
-		if err := daemon.LoadLaunchd("com.shadow.daemon"); err != nil {
-			return fmt.Errorf("start daemon: %w", err)
+		if err := installDaemon(execPath); err != nil {
+			return err
 		}
-		fmt.Println("✓ Shadow daemon started")
+		if err := startDaemonService(); err != nil {
+			return err
+		}
 		fmt.Println()
 
 		// Launch onboarding TUI.
@@ -117,10 +111,7 @@ var stopCmd = &cobra.Command{
 		}
 		_ = resp
 
-		// Unload from launchd so it does not restart (KeepAlive=true).
-		if err := daemon.UnloadLaunchd("com.shadow.daemon"); err != nil {
-			fmt.Printf("Warning: %v\n", err)
-		}
+		stopDaemonService()
 		fmt.Println("✓ Shadow daemon stopped")
 		return nil
 	},
@@ -360,12 +351,7 @@ var uninstallCmd = &cobra.Command{
 			client.Send("stop", nil)
 		}
 
-		// Uninstall launchd plist.
-		if err := daemon.UninstallLaunchd("com.shadow.daemon"); err != nil {
-			fmt.Printf("Warning: %v\n", err)
-		} else {
-			fmt.Println("✓ Unregistered launchd daemon")
-		}
+			uninstallDaemon()
 
 		if cleanBlocks {
 			fmt.Println("Removing managed blocks from agent context files...")
@@ -474,6 +460,9 @@ var openCmd = &cobra.Command{
 		}
 		url := client.HTTPURL()
 		fmt.Printf("Opening Shadow console at %s\n", url)
+		if runtime.GOOS == "windows" {
+			return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+		}
 		return exec.Command("open", url).Start()
 	},
 }

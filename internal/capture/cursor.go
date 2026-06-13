@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -42,14 +43,48 @@ func (p *CursorParser) Name() string { return "cursor" }
 // plain-text chat logs. We probe rather than scan the SQLite state.vscdb
 // (see file-level comment for why).
 func (p *CursorParser) cursorLogCandidates() []string {
-	return []string{
-		// Newer: Cursor's dedicated AI logs directory.
-		filepath.Join(p.homeDir, "Library", "Application Support", "Cursor", "ai"),
-		// Per-workspace storage (some versions dump chat JSONL here).
-		filepath.Join(p.homeDir, "Library", "Application Support", "Cursor", "User", "workspaceStorage"),
-		// Cursor's app logs directory (rare, but cheap to probe).
-		filepath.Join(p.homeDir, "Library", "Logs", "Cursor"),
+	if runtime.GOOS == "windows" {
+		return p.cursorLogCandidatesWindows()
 	}
+	return p.cursorLogCandidatesUnix()
+}
+
+func (p *CursorParser) cursorLogCandidatesUnix() []string {
+	return []string{
+		// macOS: Cursor's dedicated AI logs directory.
+		filepath.Join(p.homeDir, "Library", "Application Support", "Cursor", "ai"),
+		// macOS: Per-workspace storage (some versions dump chat JSONL here).
+		filepath.Join(p.homeDir, "Library", "Application Support", "Cursor", "User", "workspaceStorage"),
+		// macOS: Cursor's app logs directory (rare, but cheap to probe).
+		filepath.Join(p.homeDir, "Library", "Logs", "Cursor"),
+		// Linux: Cursor under ~/.config.
+		filepath.Join(p.homeDir, ".config", "Cursor", "User", "workspaceStorage"),
+	}
+}
+
+func (p *CursorParser) cursorLogCandidatesWindows() []string {
+	// On Windows, Cursor stores AI chat logs under %APPDATA%\Cursor.
+	// We use the real APPDATA path for discovery, not p.homeDir,
+	// because Cursor always uses the system paths regardless of home.
+	appData := os.Getenv("APPDATA")
+	localAppData := os.Getenv("LOCALAPPDATA")
+	candidates := []string{}
+	if appData != "" {
+		candidates = append(candidates,
+			filepath.Join(appData, "Cursor", "User", "workspaceStorage"),
+			filepath.Join(appData, "Cursor", "logs"),
+		)
+	}
+	if localAppData != "" {
+		candidates = append(candidates,
+			filepath.Join(localAppData, "Cursor", "User", "workspaceStorage"),
+		)
+	}
+	// Also probe home-relative path for testability.
+	candidates = append(candidates,
+		filepath.Join(p.homeDir, "AppData", "Roaming", "Cursor", "User", "workspaceStorage"),
+	)
+	return candidates
 }
 
 // DiscoverLogPaths finds Cursor AI chat JSONL files in known locations.

@@ -3,6 +3,7 @@ package capture
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -117,8 +118,15 @@ func TestCursorParser_Parse_SkipsAssistantAndMalformed(t *testing.T) {
 func TestCursorParser_DiscoverLogPaths(t *testing.T) {
 	home := t.TempDir()
 
-	// Create the primary Cursor AI log directory with a JSONL file.
-	aiDir := filepath.Join(home, "Library", "Application Support", "Cursor", "ai")
+	// Create platform-appropriate mock Cursor AI log directory.
+	var aiDir string
+	if runtime.GOOS == "windows" {
+		// On Windows, Cursor stores logs under %APPDATA%.
+		appData := filepath.Join(home, "AppData", "Roaming")
+		aiDir = filepath.Join(appData, "Cursor", "User", "workspaceStorage")
+	} else {
+		aiDir = filepath.Join(home, "Library", "Application Support", "Cursor", "ai")
+	}
 	if err := os.MkdirAll(aiDir, 0755); err != nil {
 		t.Fatal(err)
 	}

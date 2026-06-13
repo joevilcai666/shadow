@@ -183,7 +183,7 @@ func (m OnboardingModel) handleEnter() (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spinner.Init(), scanProject(m.cwd, m.dbPath, m.agents.SelectedItems(), m.agentsFound))
 	case 4:
 		if m.done {
-			_ = exec.Command("open", "http://localhost:7878").Start()
+			openURL("http://localhost:7878")
 			return m, tea.Quit
 		}
 		// Start scan when not done yet.
@@ -337,6 +337,13 @@ func detectAgents() tea.Cmd {
 			}
 		} else if runtime.GOOS == "linux" {
 			if _, err := os.Stat(filepath.Join(home, ".cursor")); err == nil {
+				agents = append(agents, "Cursor")
+			}
+		} else if runtime.GOOS == "windows" {
+			localAppData := os.Getenv("LOCALAPPDATA")
+			if _, err := os.Stat(filepath.Join(localAppData, "Programs", "Cursor")); err == nil {
+				agents = append(agents, "Cursor")
+			} else if _, err := os.Stat(filepath.Join(home, ".cursor")); err == nil {
 				agents = append(agents, "Cursor")
 			}
 		}

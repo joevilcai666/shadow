@@ -4,10 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -24,9 +21,8 @@ type Client struct {
 
 // NewClient creates a new IPC client.
 func NewClient() *Client {
-	home, _ := os.UserHomeDir()
 	return &Client{
-		sockPath: filepath.Join(home, ".shadow", "shadow.sock"),
+		sockPath: defaultSockPath(),
 		httpURL:  DefaultHTTPAddress,
 	}
 }
@@ -34,9 +30,8 @@ func NewClient() *Client {
 // NewClientWithHTTP returns a client that points at a non-default HTTP
 // address. Useful for tests; the CLI uses the default.
 func NewClientWithHTTP(httpURL string) *Client {
-	home, _ := os.UserHomeDir()
 	return &Client{
-		sockPath: filepath.Join(home, ".shadow", "shadow.sock"),
+		sockPath: defaultSockPath(),
 		httpURL:  httpURL,
 	}
 }
@@ -61,7 +56,7 @@ func (c *Client) Send(method string, params any) (*IPCResponse, error) {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	conn, err := net.DialTimeout("unix", c.sockPath, 3*time.Second)
+	conn, err := dialIPC(c.sockPath)
 	if err != nil {
 		return nil, fmt.Errorf("connect to daemon: %w (is shadow running?)", err)
 	}
@@ -91,7 +86,7 @@ func (c *Client) IsRunning() bool {
 }
 
 // WaitForHTTP polls the daemon's HTTP endpoint until it answers 2xx
-// or the timeout elapses. The daemon's Unix socket is bound at boot
+// or the timeout elapses. The daemon's IPC socket is bound at boot
 // but the HTTP listener follows ~100ms later (see daemon.Run), so a
 // caller that just observed IsRunning() == true still needs to wait
 // before opening the browser.

@@ -361,7 +361,8 @@ func (p *ClaudeCodeParser) Parse(filePath string, offset int64) ([]Signal, int64
 func extractProjectPath(logPath string) string {
 	// Claude Code stores logs under ~/.claude/projects/<encoded-project-path>/
 	// The path is encoded (e.g., "-Users-dev-myproject").
-	parts := strings.Split(logPath, string(filepath.Separator))
+	// Claude Code uses forward slashes for path encoding on all platforms.
+	parts := strings.Split(logPath, "/")
 	for i, p := range parts {
 		if p == "projects" && i+1 < len(parts) {
 			encoded := parts[i+1]

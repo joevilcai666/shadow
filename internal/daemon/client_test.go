@@ -3,7 +3,8 @@ package daemon
 import (
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -72,8 +73,14 @@ func TestNewClientDefaults(t *testing.T) {
 	if c.HTTPURL() != DefaultHTTPAddress {
 		t.Errorf("HTTPURL = %q, want %q", c.HTTPURL(), DefaultHTTPAddress)
 	}
-	// sockPath must end in shadow.sock (independent of cwd).
-	if filepath.Base(c.sockPath) != "shadow.sock" {
-		t.Errorf("sockPath = %q, want .../shadow.sock", c.sockPath)
+	// sockPath must be platform-appropriate.
+	if runtime.GOOS == "windows" {
+		if !strings.Contains(c.sockPath, "shadow-daemon") {
+			t.Errorf("sockPath = %q, want named pipe path containing shadow-daemon", c.sockPath)
+		}
+	} else {
+		if !strings.HasSuffix(c.sockPath, "shadow.sock") {
+			t.Errorf("sockPath = %q, want .../shadow.sock", c.sockPath)
+		}
 	}
 }

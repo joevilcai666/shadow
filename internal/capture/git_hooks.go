@@ -9,6 +9,10 @@ import (
 )
 
 // GitHooks manages Shadow's git hooks for capturing implicit correction signals.
+//
+// Hook scripts use #!/bin/sh and curl. On Windows, Git for Windows (which
+// includes Git Bash) is required for hooks to execute. Without it hooks
+// silently fail — capture simply misses those implicit signals.
 type GitHooks struct {
 	homeDir  string
 	sockPath string
