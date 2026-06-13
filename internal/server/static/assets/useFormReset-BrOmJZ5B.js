@@ -1,1 +1,0 @@
-import{Rt as e,Ut as t,ot as n}from"./index-D4intL5a.js";var r=t(e(),1);function i(e,t,i){let a=n(e=>{i&&!e.defaultPrevented&&i(t)});(0,r.useEffect)(()=>{let t=e?.current?.form;return t?.addEventListener(`reset`,a),()=>{t?.removeEventListener(`reset`,a)}},[e])}export{i as t};

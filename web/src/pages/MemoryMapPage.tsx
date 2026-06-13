@@ -1,7 +1,3 @@
-// 记忆地图页面入口
-// 拉取后端 /api/dashboard/map 的真数据，传给 MemoryMap 组件；
-// 没有真实数据时才展示示例；有任何真实规则时，证据链必须完全来自后端。
-
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MemoryMap } from '../memory-map/MemoryMap';
@@ -29,8 +25,6 @@ export default function MemoryMapPage() {
       const realNodes = (map.nodes ?? []) as MemoryNodeData[];
       const nodesForCanvas = realNodes.length > 0 ? realNodes : MOCK_NODES;
 
-      // Translate backend edge shape (source/target + data) into the
-      // shape MemoryMap's relations prop expects.
       const realRelations = (map.edges ?? []).map((e: DashboardMapEdge) => ({
         source: e.source,
         target: e.target,
@@ -52,7 +46,7 @@ export default function MemoryMapPage() {
       setError(null);
       setLoading(false);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '加载失败');
+      setError(e instanceof Error ? e.message : 'Failed to load memory map');
       setLoading(false);
     }
   }, []);
@@ -64,7 +58,7 @@ export default function MemoryMapPage() {
 
   return (
     <div className="mm-page-wrapper">
-      {loading && <div className="mm-loading">载入记忆地图…</div>}
+      {loading && <div className="mm-loading">Loading memory map...</div>}
       {error && <div className="mm-error">{error}</div>}
       {!loading && !error && (
         <MemoryMap

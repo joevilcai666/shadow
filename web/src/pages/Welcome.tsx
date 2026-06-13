@@ -32,7 +32,6 @@ export default function Welcome() {
     api.listRules({ status: 'candidate' })
       .then(r => {
         setRules(r || []);
-        // Pre-select high confidence items
         const preSelected = new Set<string>();
         (r || []).forEach(rule => {
           if (rule.confidence >= 0.7) preSelected.add(rule.id);
@@ -53,7 +52,6 @@ export default function Welcome() {
     if (selected.size > 0) {
       await api.batchRules('activate', Array.from(selected));
     }
-    // Disable unselected candidates
     const unselected = rules.filter(r => !selected.has(r.id)).map(r => r.id);
     if (unselected.length > 0) {
       await api.batchRules('disable', unselected);
@@ -69,53 +67,51 @@ export default function Welcome() {
     navigate('/');
   };
 
-  // Demo data — cycles through the user's real rules if available,
-  // otherwise falls back to a built-in roster of examples.
   const SEED_EXAMPLES: DemoExample[] = [
     {
       task: 'Add a dependency installation script',
-      before: ['$ npm install express', '✗ Used npm (you corrected this before)', '✗ Did not follow your project conventions'],
-      after:  ['$ pnpm add express',         '✓ Automatically used pnpm',           '✓ Followed your project conventions'],
-      memory: '本项目使用 pnpm，不要用 npm/yarn',
+      before: ['$ npm install express', '[x] Used npm (you corrected this before)', '[x] Did not follow your project conventions'],
+      after: ['$ pnpm add express', '[ok] Automatically used pnpm', '[ok] Followed your project conventions'],
+      memory: 'This project uses pnpm; do not use npm or yarn',
       evidence: {
         source: 'Local explainable demo',
-        rule: '本项目使用 pnpm，不要用 npm/yarn',
+        rule: 'This project uses pnpm; do not use npm or yarn',
         target: 'AGENTS.md / CLAUDE.md managed block',
         hit: 'Simulated locally because no user rule is active yet',
       },
     },
     {
       task: 'Name a new utility file',
-      before: ['src/string_utils.ts',         '✗ Used snake_case (you said camelCase)', '✗ Did not respect the project naming convention'],
-      after:  ['src/stringUtils.ts',          '✓ Used camelCase',                       '✓ Matches the project naming rule'],
-      memory: '本项目使用 camelCase 命名，禁止 snake_case',
+      before: ['src/string_utils.ts', '[x] Used snake_case (you said camelCase)', '[x] Did not respect the project naming convention'],
+      after: ['src/stringUtils.ts', '[ok] Used camelCase', '[ok] Matches the project naming rule'],
+      memory: 'Use camelCase filenames; avoid snake_case',
       evidence: {
         source: 'Local explainable demo',
-        rule: '本项目使用 camelCase 命名，禁止 snake_case',
+        rule: 'Use camelCase filenames; avoid snake_case',
         target: 'Project agent context managed block',
         hit: 'Simulated locally because no user rule is active yet',
       },
     },
     {
       task: 'Write a test for a new function',
-      before: ['import { test } from "jest"',  '✗ Used jest (project uses vitest)',   '✗ Has to be rewritten before CI runs'],
-      after:  ['import { test } from "vitest"', '✓ Switched to vitest',                '✓ Matches the project testing stack'],
-      memory: '测试用 vitest，不用 jest',
+      before: ['import { test } from "jest"', '[x] Used jest (project uses vitest)', '[x] Has to be rewritten before CI runs'],
+      after: ['import { test } from "vitest"', '[ok] Switched to vitest', '[ok] Matches the project testing stack'],
+      memory: 'Use Vitest for tests; do not use Jest',
       evidence: {
         source: 'Local explainable demo',
-        rule: '测试用 vitest，不用 jest',
+        rule: 'Use Vitest for tests; do not use Jest',
         target: 'Project agent context managed block',
         hit: 'Simulated locally because no user rule is active yet',
       },
     },
     {
       task: 'Handle an error in a fetch call',
-      before: ['throw new Error("network failed")', '✗ Throws across the data layer', '✗ Violates your error-handling convention'],
-      after:  ['return Err("network failed")',       '✓ Returns Result type',         '✓ Matches your architecture rule'],
-      memory: '错误处理优先使用 Result 类型而非 throw',
+      before: ['throw new Error("network failed")', '[x] Throws across the data layer', '[x] Violates your error-handling convention'],
+      after: ['return Err("network failed")', '[ok] Returns Result type', '[ok] Matches your architecture rule'],
+      memory: 'Prefer Result-style error returns instead of throwing across data boundaries',
       evidence: {
         source: 'Local explainable demo',
-        rule: '错误处理优先使用 Result 类型而非 throw',
+        rule: 'Prefer Result-style error returns instead of throwing across data boundaries',
         target: 'Project agent context managed block',
         hit: 'Simulated locally because no user rule is active yet',
       },
@@ -125,8 +121,8 @@ export default function Welcome() {
   const userExamples = rules.slice(0, 4).map(r => ({
     ruleId: r.id,
     task: 'Your captured rule',
-    before: ['agent does the wrong thing', `✗ Violates "${r.content}"`],
-    after:  ['agent follows the rule',     `✓ Honors "${r.content.slice(0, 32)}…"`],
+    before: ['agent does the wrong thing', `[x] Violates "${r.content}"`],
+    after: ['agent follows the rule', `[ok] Honors "${r.content.slice(0, 32)}..."`],
     memory: r.content,
     evidence: {
       source: r.trigger_context || `Local scan${r.project_path ? ` from ${r.project_path}` : ''}`,
@@ -166,10 +162,8 @@ export default function Welcome() {
   return (
     <div className="min-h-screen bg-gray-950 text-gray-100">
       <div className="max-w-3xl mx-auto px-6 py-8">
-        {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
-            <span className="text-2xl">👻</span>
             <span className="text-lg font-bold text-purple-400">Shadow</span>
           </div>
           <div className="flex items-center gap-4">
@@ -179,31 +173,29 @@ export default function Welcome() {
               ))}
             </div>
             <ShadowButton onClick={finishOnboarding} tone="subtle" className="h-8 min-h-8 px-2 text-xs">
-              Skip to Console →
+              Skip to Console -&gt;
             </ShadowButton>
           </div>
         </div>
 
-        {/* Step 1: Review */}
         {step === 'review' && (
           <div>
             <h1 className="text-2xl font-bold mb-2">Review Your Initial Memories</h1>
             <p className="text-gray-400 mb-6">
               {rules.length > 0
                 ? `We found ${rules.length} candidate rules from your project. Select which ones to activate.`
-                : "No candidate rules found yet. Start coding and Shadow will learn automatically!"}
+                : 'No candidate rules found yet. Start coding and Shadow will learn automatically!'}
             </p>
 
             {rules.length > 0 ? (
               <>
-                {/* Global vs Project grouping */}
                 {['global', 'project'].map(scope => {
                   const scopedRules = rules.filter(r => r.scope === scope);
                   if (scopedRules.length === 0) return null;
                   return (
                     <div key={scope} className="mb-6">
                       <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
-                        {scope === 'global' ? '🌐 Global Rules' : '📁 Project Rules'} ({scopedRules.length})
+                        {scope === 'global' ? 'Global Rules' : 'Project Rules'} ({scopedRules.length})
                       </h3>
                       <div className="space-y-2">
                         {scopedRules.map(rule => (
@@ -255,18 +247,16 @@ export default function Welcome() {
               </>
             ) : (
               <div className="text-center py-16">
-                <div className="text-6xl mb-4">🌱</div>
                 <p className="text-gray-400 mb-2">No initial memories yet</p>
                 <p className="text-sm text-gray-500">Start coding with your agents and Shadow will capture your corrections automatically.</p>
                 <ShadowButton onClick={finishOnboarding} tone="primary" className="mt-6 px-5">
-                  Enter Console →
+                  Enter Console -&gt;
                 </ShadowButton>
               </div>
             )}
           </div>
         )}
 
-        {/* Step 2: Aha Demo */}
         {step === 'demo' && (
           <div>
             <h1 className="text-2xl font-bold mb-2">See the Difference</h1>
@@ -279,13 +269,12 @@ export default function Welcome() {
                   tone="subtle"
                   className="ml-3 h-7 min-h-7 px-2 text-xs"
                 >
-                  重新演示 ({demoIndex + 1}/{examples.length})
+                  Show next ({demoIndex + 1}/{examples.length})
                 </ShadowButton>
               )}
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-              {/* Without Shadow */}
               <ShadowCard className="border-red-500/30 p-6">
                 <Card.Header className="mb-4 flex items-center gap-2 p-0">
                   <XCircle size={18} className="text-red-400" />
@@ -298,7 +287,6 @@ export default function Welcome() {
                 </Card.Content>
               </ShadowCard>
 
-              {/* With Shadow */}
               <ShadowCard className="border-green-500/30 p-6">
                 <Card.Header className="mb-4 flex items-center gap-2 p-0">
                   <CheckCircle size={18} className="text-green-400" />
@@ -310,7 +298,7 @@ export default function Welcome() {
                   ))}
                 </Card.Content>
                 <div className="mt-3 text-xs text-purple-400">
-                  ✓ Memory hit: "{demoExample.memory}"
+                  Memory hit: "{demoExample.memory}"
                 </div>
                 <div className="mt-4 rounded-lg border border-gray-800 bg-gray-900/70 p-3 text-xs">
                   <div className="mb-2 font-semibold text-gray-300">Evidence chain</div>
@@ -330,13 +318,13 @@ export default function Welcome() {
             </div>
 
             <div className="text-center py-4">
-              <p className="text-lg mb-6">✨ <span className="font-semibold">The same mistake, this time it got it right.</span></p>
+              <p className="text-lg mb-6"><span className="font-semibold">The same mistake, this time it got it right.</span></p>
               <ShadowButton
                 onClick={finishOnboarding}
                 tone="primary"
                 className="px-6 py-3"
               >
-                Enter Console →
+                Enter Console -&gt;
               </ShadowButton>
             </div>
           </div>

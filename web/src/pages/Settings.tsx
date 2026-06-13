@@ -24,7 +24,6 @@ export default function Settings() {
     setSaving(true);
     try {
       await api.updateConfig({ [key]: value });
-      // Optimistic update
       if (config) {
         const newConfig = {
           ...config,
@@ -205,9 +204,8 @@ export default function Settings() {
           </div>
         </SectionCard>
 
-        {/* About */}
         <ShadowCard className="p-4 text-center">
-          <p className="text-sm text-gray-500">Shadow v0.1.0 — Local-first, your data stays yours.</p>
+          <p className="text-sm text-gray-500">Shadow v0.1.0 - Local-first, your data stays yours.</p>
           <p className="text-xs text-gray-600 mt-1">Run <code className="bg-gray-800 px-1 py-0.5 rounded">shadow uninstall --clean-blocks</code> to remove all traces.</p>
         </ShadowCard>
       </div>

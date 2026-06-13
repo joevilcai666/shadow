@@ -30,11 +30,9 @@ export default function Layout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen flex-col bg-gray-950 text-gray-100 md:flex-row">
-      {/* Sidebar */}
       <aside className="flex w-full shrink-0 flex-col border-b border-gray-800 bg-gray-900 md:w-56 md:border-b-0 md:border-r md:h-screen md:overflow-y-auto">
         <div className="border-b border-gray-800 p-4 md:p-5">
           <Link to="/" className="flex items-center gap-2 text-lg font-bold">
-            <span className="text-purple-400 text-xl">👻</span>
             <span className="text-purple-400">Shadow</span>
           </Link>
           <p className="text-xs text-gray-500 mt-1">AI Agent Memory Layer</p>
@@ -72,12 +70,11 @@ export default function Layout({ children }: { children: ReactNode }) {
               <Zap size={14} className="text-green-400" />
               Daemon Running
             </div>
-            <p className="mt-1 text-xs text-gray-600">localhost:7878 · local mode</p>
+            <p className="mt-1 text-xs text-gray-600">localhost:7878 - local mode</p>
           </ShadowCard>
         </div>
       </aside>
 
-      {/* Main content */}
       <main className="min-h-[calc(100vh-132px)] flex-1 overflow-auto md:h-screen md:min-h-screen">
         {children}
       </main>
