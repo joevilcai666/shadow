@@ -27,7 +27,7 @@ type CandidateRule struct {
 
 // Engine converts captured signals into candidate rules.
 type Engine struct {
-	mu       sync.Mutex
+	mu        sync.Mutex
 	distiller Distiller
 	ruleDB    *storage.RuleRepo
 	sourceDB  *storage.SourceRepo
@@ -69,25 +69,18 @@ func (e *Engine) ProcessSignals(sources []*storage.Source) error {
 		return nil
 	}
 
-	// Check for similar existing rules.
+	similar, err := e.mergeSimilarRule(candidate, sources)
+	if err != nil {
+		return err
+	}
+	if similar {
+		return nil
+	}
+
 	existing, err := e.ruleDB.List(storage.RuleFilter{Status: "active"})
 	if err != nil {
 		return fmt.Errorf("fetch existing rules: %w", err)
 	}
-
-	similar, err := e.distiller.CheckSimilarity(candidate.Content, existing)
-	if err != nil {
-		slog.Warn("similarity check failed", "error", err)
-	}
-
-	if similar != nil {
-		// Merge: boost confidence, update the existing rule.
-		slog.Info("merging with existing similar rule", "rule_id", similar.ID)
-		similar.Confidence = min(similar.Confidence+0.1, 1.0)
-		similar.UpdatedAt = storage.Now()
-		return e.ruleDB.Update(similar, "auto", "merged similar signals")
-	}
-
 	// Check for conflicts.
 	if e.distiller.DetectConflict(candidate.Content, existing) {
 		slog.Info("new rule conflicts with existing", "content", candidate.Content)
@@ -113,7 +106,51 @@ func (e *Engine) ProcessExplicitSignal(source *storage.Source) error {
 		}
 	}
 
+	similar, err := e.mergeSimilarRule(candidate, sources)
+	if err != nil {
+		return err
+	}
+	if similar {
+		return nil
+	}
+
 	return e.createRule(candidate, sources, "candidate")
+}
+
+func (e *Engine) mergeSimilarRule(candidate *CandidateRule, sources []*storage.Source) (bool, error) {
+	existing, err := e.mergeCandidates()
+	if err != nil {
+		return false, fmt.Errorf("fetch existing rules: %w", err)
+	}
+	similar, err := e.distiller.CheckSimilarity(candidate.Content, existing)
+	if err != nil {
+		slog.Warn("similarity check failed", "error", err)
+		return false, nil
+	}
+	if similar == nil {
+		return false, nil
+	}
+
+	slog.Info("merging with existing similar rule", "rule_id", similar.ID)
+	similar.Confidence = min(similar.Confidence+0.1, 1.0)
+	similar.UpdatedAt = storage.Now()
+	if err := e.ruleDB.Update(similar, "auto", "merged similar signals"); err != nil {
+		return false, fmt.Errorf("merge similar rule: %w", err)
+	}
+	e.linkSourcesToRule(sources, similar.ID)
+	return true, nil
+}
+
+func (e *Engine) mergeCandidates() ([]*storage.Rule, error) {
+	var existing []*storage.Rule
+	for _, status := range []string{"active", "candidate"} {
+		rules, err := e.ruleDB.List(storage.RuleFilter{Status: status})
+		if err != nil {
+			return nil, err
+		}
+		existing = append(existing, rules...)
+	}
+	return existing, nil
 }
 
 func (e *Engine) createRule(candidate *CandidateRule, sources []*storage.Source, status string) error {
@@ -148,14 +185,7 @@ func (e *Engine) createRule(candidate *CandidateRule, sources []*storage.Source,
 		return fmt.Errorf("create rule: %w", err)
 	}
 
-	// Link sources to the rule.
-	for _, s := range sources {
-		if err := e.sourceDB.LinkToRule(s.ID, rule.ID); err != nil {
-			slog.Warn("link source to rule failed", "source_id", s.ID, "rule_id", rule.ID, "error", err)
-			continue
-		}
-		slog.Debug("linked source to rule", "source_id", s.ID, "rule_id", rule.ID)
-	}
+	e.linkSourcesToRule(sources, rule.ID)
 
 	slog.Info("created candidate rule",
 		"rule_id", rule.ID,
@@ -165,6 +195,16 @@ func (e *Engine) createRule(candidate *CandidateRule, sources []*storage.Source,
 	)
 
 	return nil
+}
+
+func (e *Engine) linkSourcesToRule(sources []*storage.Source, ruleID string) {
+	for _, s := range sources {
+		if err := e.sourceDB.LinkToRule(s.ID, ruleID); err != nil {
+			slog.Warn("link source to rule failed", "source_id", s.ID, "rule_id", ruleID, "error", err)
+			continue
+		}
+		slog.Debug("linked source to rule", "source_id", s.ID, "rule_id", ruleID)
+	}
 }
 
 func (e *Engine) meetsThreshold(sources []*storage.Source) bool {

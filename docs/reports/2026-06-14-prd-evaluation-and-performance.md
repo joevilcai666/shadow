@@ -87,6 +87,10 @@ and the dashboard hit-rate summary.
 - Fixed localhost-only API host parsing so valid loopback hosts without explicit
   ports (`localhost`, `127.0.0.1`, `::1`) are accepted while external hosts
   remain forbidden.
+- Explicit correction signals now merge into similar active/candidate rules
+  instead of creating duplicate candidate memories, preserving the Shadow_qt
+  "one shared rule across agents" behavior while retaining linked source
+  evidence.
 
 ## Performance Changes In This Pass
 
@@ -116,6 +120,7 @@ Run after this pass:
 - `go vet ./...`
 - `npm run lint` from `web`
 - `go test ./internal/server -run TestLocalhostOnlyAcceptsLoopbackHostsWithoutPorts -count=1`
+- `go test ./internal/distill -run TestProcessExplicitSignalMergesSimilarExistingCandidate -count=1`
 - Browser smoke against `http://127.0.0.1:7878/`: dashboard rendered
   Shadow console content and browser error logs were empty.
 

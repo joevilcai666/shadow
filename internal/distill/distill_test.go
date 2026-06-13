@@ -74,6 +74,58 @@ func TestProcessExplicitSignal(t *testing.T) {
 	}
 }
 
+func TestProcessExplicitSignalMergesSimilarExistingCandidate(t *testing.T) {
+	engine, ruleDB, sourceDB := testDistillEngine(t)
+
+	first := &storage.Source{
+		ID: storage.NewID(), SignalType: "manual_mark", SignalStrength: "strong",
+		AgentName: "claude-code", ProjectPath: "/tmp/proj",
+		RawSnippet: "Don't use npm, use pnpm instead",
+		Timestamp:  storage.Now(), ConfidenceContribution: 0.8,
+	}
+	if err := sourceDB.Create(first); err != nil {
+		t.Fatalf("create first source: %v", err)
+	}
+	if err := engine.ProcessExplicitSignal(first); err != nil {
+		t.Fatalf("process first explicit: %v", err)
+	}
+
+	second := &storage.Source{
+		ID: storage.NewID(), SignalType: "manual_mark", SignalStrength: "strong",
+		AgentName: "openclaw", ProjectPath: "/tmp/proj",
+		RawSnippet: "Use pnpm instead of npm",
+		Timestamp:  storage.Now(), ConfidenceContribution: 0.7,
+	}
+	if err := sourceDB.Create(second); err != nil {
+		t.Fatalf("create second source: %v", err)
+	}
+	if err := engine.ProcessExplicitSignal(second); err != nil {
+		t.Fatalf("process second explicit: %v", err)
+	}
+
+	rules, err := ruleDB.List(storage.RuleFilter{})
+	if err != nil {
+		t.Fatalf("list rules: %v", err)
+	}
+	if len(rules) != 1 {
+		t.Fatalf("rules = %d, want 1 merged candidate", len(rules))
+	}
+	if rules[0].Version != 2 {
+		t.Fatalf("version = %d, want 2 after merge", rules[0].Version)
+	}
+	if rules[0].Confidence <= 0.8 {
+		t.Fatalf("confidence = %f, want boosted above first signal", rules[0].Confidence)
+	}
+
+	sources, err := sourceDB.ListByRuleID(rules[0].ID)
+	if err != nil {
+		t.Fatalf("list linked sources: %v", err)
+	}
+	if len(sources) != 2 {
+		t.Fatalf("linked sources = %d, want 2", len(sources))
+	}
+}
+
 func TestSimilarityDetection(t *testing.T) {
 	distiller := NewRuleBasedDistiller()
 
@@ -132,8 +184,8 @@ func TestCategorize(t *testing.T) {
 
 func TestCleanContent(t *testing.T) {
 	tests := []struct {
-		input  string
-		want   string
+		input string
+		want  string
 	}{
 		{"不对，应该用 pnpm", "应该用 pnpm"},
 		{"Don't use npm", "Do not use npm"},
