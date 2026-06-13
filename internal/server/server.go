@@ -894,14 +894,30 @@ func (s *Server) getDashboardMap(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Pass 2 — tag-overlap edges (structure / whisper). O(n^2) over tag
-	// sets is fine at v1 scale (<500 rules). Each pair appears at most once.
+	// Pass 2 — tag-overlap scan. Collect candidates per node instead of
+	// emitting every pair. After the scan, each node keeps only its best
+	// structure/whisper edges (de-duplicated A↔B), capping at 8 structure
+	// and 4 whisper edges per node. This follows the "做减法" philosophy:
+	// without the cap, 500 rules with a shared tag produce ~124K whisper
+	// edges (~11 MB of JSON) and make the Memory Map unusable.
+	//
+	// Candidates are collected into per-node buckets during the O(n²) sweep
+	// and then trimmed. The node-edge budget constants live here so the
+	// entire sieve is visible in one place.
+	const maxStructurePerNode = 8
+	const maxWhisperPerNode = 4
+	type edgeCandidate struct {
+		source, target string
+		tier           string
+		score          float64
+		reason         string
+	}
+	nodeEdges := make(map[string][]edgeCandidate, len(rules))
+
 	for i := 0; i < len(rules); i++ {
 		for j := i + 1; j < len(rules); j++ {
 			shared := tagOverlap(rules[i].Tags, rules[j].Tags)
 			if shared == 0 {
-				// No structural connection and (handled above) no conflict.
-				// This is the "hidden" tier — we don't even generate it.
 				stats["hidden"]++
 				continue
 			}
@@ -912,16 +928,53 @@ func (s *Server) getDashboardMap(w http.ResponseWriter, r *http.Request) {
 				stats["hidden"]++
 				continue
 			}
+			ec := edgeCandidate{
+				source: rules[i].ID, target: rules[j].ID,
+				tier: tier, score: score, reason: reason,
+			}
+			nodeEdges[rules[i].ID] = append(nodeEdges[rules[i].ID], ec)
+			// Record reverse direction so the other node's budget sees it too.
+			rev := ec
+			rev.source, rev.target = ec.target, ec.source
+			nodeEdges[rules[j].ID] = append(nodeEdges[rules[j].ID], rev)
+		}
+	}
+
+	// Trim: keep per-node budget, de-duplicate A↔B.
+	seen := make(map[string]struct{}, len(rules)*4)
+	for _, ecs := range nodeEdges {
+		structCount := 0
+		whispCount := 0
+		for _, ec := range ecs {
+			key := edgeKey(ec.source, ec.target)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			switch ec.tier {
+			case "structure":
+				if structCount >= maxStructurePerNode {
+					continue
+				}
+				structCount++
+			case "whisper":
+				if whispCount >= maxWhisperPerNode {
+					continue
+				}
+				whispCount++
+			default:
+				continue // signal edges were emitted in Pass 1
+			}
+			seen[key] = struct{}{}
 			edges = append(edges, map[string]any{
-				"source": rules[i].ID,
-				"target": rules[j].ID,
+				"source": ec.source,
+				"target": ec.target,
 				"data": map[string]any{
-					"tier":   tier,
-					"score":  score,
-					"reason": reason,
+					"tier":   ec.tier,
+					"score":  ec.score,
+					"reason": ec.reason,
 				},
 			})
-			stats[tier]++
+			stats[ec.tier]++
 		}
 	}
 
@@ -1082,6 +1135,15 @@ func mapStatus(status string) string {
 		return "active"
 	}
 	return "other"
+}
+
+// edgeKey produces a canonical string key for an unordered edge so we can
+// de-duplicate A→B and B→A as the same undirected relation.
+func edgeKey(a, b string) string {
+	if a < b {
+		return a + "\x00" + b
+	}
+	return b + "\x00" + a
 }
 
 // tagOverlap returns how many strings the two slices share.
