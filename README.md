@@ -264,6 +264,7 @@ Shadow includes a local web console at `http://localhost:7878`:
 ## Privacy Promise
 
 - All data stored locally under `~/.shadow/`
+- Rules and user memories can be exported locally from `GET /api/export`
 - No login required for local use
 - API keys, tokens, and credentials are blocked by deny patterns before storage
 - Only distilled rules are stored — never raw conversations

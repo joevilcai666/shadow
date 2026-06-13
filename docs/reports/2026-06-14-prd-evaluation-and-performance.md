@@ -27,6 +27,7 @@ and the dashboard hit-rate summary.
 | Rule management UI/API | Implemented | CRUD, timeline, events, versions, rollback, config, adapters, conflicts |
 | Effectiveness dashboard | Implemented as proxy | hit-rate endpoint, rule-hit events, adapter sync status, memory map |
 | Privacy boundary | Implemented | deny-pattern checks before rule/memory/source persistence |
+| Local export | Implemented | `GET /api/export` returns a local JSON package with rules and user memories |
 | Uninstall rollback | Mostly implemented | `shadow uninstall --clean-blocks` removes managed blocks for primary adapters |
 
 ## Remaining Product Gaps
@@ -51,6 +52,9 @@ and the dashboard hit-rate summary.
 - Added focused regression coverage for OpenClaw adapter writes/removal, default
   config enablement, API listing/toggle persistence, task injection,
   onboarding display, and health status.
+- Added a local export package endpoint so users can export their rules and
+  user memories without cloud sync, matching the PRD's "visible, deletable,
+  exportable" data boundary and MVP export requirement.
 
 ## Performance Changes In This Pass
 

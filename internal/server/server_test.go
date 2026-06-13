@@ -124,6 +124,69 @@ func TestCreateAndGetRule(t *testing.T) {
 	}
 }
 
+func TestExportPackageIncludesRulesAndMemories(t *testing.T) {
+	s, db := testEnv(t)
+	rule := &storage.Rule{
+		ID:             storage.NewID(),
+		Content:        "Use pnpm not npm",
+		Scope:          "global",
+		Tags:           []string{"tooling"},
+		Category:       "practice",
+		TriggerContext: "package install",
+		Confidence:     0.9,
+		Status:         "active",
+		Version:        1,
+		CreatedAt:      storage.Now(),
+		UpdatedAt:      storage.Now(),
+	}
+	if err := storage.NewRuleRepo(db).Create(rule); err != nil {
+		t.Fatalf("create rule: %v", err)
+	}
+	memory := &storage.UserMemory{
+		ID:        storage.NewID(),
+		UserID:    "local",
+		Content:   "I prefer terse commit messages",
+		Category:  "preference",
+		Tags:      []string{"git"},
+		CreatedAt: storage.Now(),
+		UpdatedAt: storage.Now(),
+	}
+	if err := storage.NewUserMemoryRepo(db).Create(memory); err != nil {
+		t.Fatalf("create memory: %v", err)
+	}
+
+	req := newLocalRequest("GET", "/api/export", nil)
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("export status: got %d, want %d. body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("content-type = %q, want application/json", ct)
+	}
+
+	var payload struct {
+		SchemaVersion string                `json:"schema_version"`
+		RuleCount     int                   `json:"rule_count"`
+		MemoryCount   int                   `json:"memory_count"`
+		Rules         []*storage.Rule       `json:"rules"`
+		Memories      []*storage.UserMemory `json:"memories"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode export: %v", err)
+	}
+	if payload.SchemaVersion != "shadow.export.v1" {
+		t.Fatalf("schema_version = %q", payload.SchemaVersion)
+	}
+	if payload.RuleCount != 1 || len(payload.Rules) != 1 || payload.Rules[0].Content != rule.Content {
+		t.Fatalf("rules = count:%d payload:%#v", payload.RuleCount, payload.Rules)
+	}
+	if payload.MemoryCount != 1 || len(payload.Memories) != 1 || payload.Memories[0].Content != memory.Content {
+		t.Fatalf("memories = count:%d payload:%#v", payload.MemoryCount, payload.Memories)
+	}
+}
+
 func TestDeleteRule(t *testing.T) {
 	s, _ := testEnv(t)
 

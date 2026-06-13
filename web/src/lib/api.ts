@@ -126,6 +126,26 @@ export interface ConflictPair {
   reason: string;
 }
 
+export interface ExportPackage {
+  schema_version: 'shadow.export.v1';
+  exported_at: string;
+  rule_count: number;
+  memory_count: number;
+  rules: Rule[];
+  memories: UserMemory[];
+}
+
+export interface UserMemory {
+  id: string;
+  user_id: string;
+  content: string;
+  category: 'preference' | 'convention' | 'context';
+  project_path?: string;
+  tags: string[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Config {
   capture: { enabled: boolean; projects: Record<string, { enabled: boolean }> };
   privacy: { exclude_patterns: string[]; deny_patterns: string[] };
@@ -166,6 +186,7 @@ export const api = {
   getDashboard: () => fetchAPI<DashboardData>('/dashboard'),
   getDashboardMap: () => fetchAPI<DashboardMapData>('/dashboard/map'),
   listConflicts: () => fetchAPI<ConflictPair[]>('/conflicts'),
+  exportPackage: () => fetchAPI<ExportPackage>('/export'),
 
   // Config
   getConfig: () => fetchAPI<Config>('/config'),

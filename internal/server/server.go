@@ -126,6 +126,7 @@ func (s *Server) routes() {
 	api.HandleFunc("/memories", s.listMemories).Methods("GET")
 	api.HandleFunc("/memories", s.createMemory).Methods("POST")
 	api.HandleFunc("/memories/{id}", s.deleteMemory).Methods("DELETE")
+	api.HandleFunc("/export", s.exportPackage).Methods("GET")
 
 	// Projects
 	api.HandleFunc("/projects", s.listProjects).Methods("GET")
@@ -430,6 +431,44 @@ func (s *Server) deleteMemory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+type exportPackage struct {
+	SchemaVersion string                `json:"schema_version"`
+	ExportedAt    string                `json:"exported_at"`
+	RuleCount     int                   `json:"rule_count"`
+	MemoryCount   int                   `json:"memory_count"`
+	Rules         []*storage.Rule       `json:"rules"`
+	Memories      []*storage.UserMemory `json:"memories"`
+}
+
+func (s *Server) exportPackage(w http.ResponseWriter, r *http.Request) {
+	rules, err := s.ruleRepo.List(storage.RuleFilter{})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "export rules: "+err.Error())
+		return
+	}
+	memories, err := s.userMemoryRepo.List("", "")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "export memories: "+err.Error())
+		return
+	}
+	if rules == nil {
+		rules = []*storage.Rule{}
+	}
+	if memories == nil {
+		memories = []*storage.UserMemory{}
+	}
+
+	w.Header().Set("Content-Disposition", `attachment; filename="shadow-export.json"`)
+	writeJSON(w, http.StatusOK, exportPackage{
+		SchemaVersion: "shadow.export.v1",
+		ExportedAt:    storage.Now(),
+		RuleCount:     len(rules),
+		MemoryCount:   len(memories),
+		Rules:         rules,
+		Memories:      memories,
+	})
 }
 
 func (s *Server) getRuleTimeline(w http.ResponseWriter, r *http.Request) {
