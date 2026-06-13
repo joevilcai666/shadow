@@ -36,8 +36,9 @@ and the dashboard hit-rate summary.
 - The PRD's exact user-perceived repeated-error recurrence metric is not
   directly measurable yet. Current hit-rate and repeated-hit rule rate are
   useful local proxies, not a replacement for explicit user feedback.
-- Web onboarding and Aha demo exist as UI surfaces, but should be tested with
-  real seeded candidate rules in the next product QA pass.
+- Web onboarding and Aha demo now cover both seeded candidate rules and the
+  empty-candidate first-run state; broader browser QA should still exercise
+  multiple viewport sizes before release.
 - Capture is broad enough for MVP validation, but more implicit signals
   (accept/reject feedback, repeated prompt detection, CI-failure corrections)
   remain experimental.
@@ -76,6 +77,8 @@ and the dashboard hit-rate summary.
 - Added a repeated-hit recurrence proxy to `/api/stats/hit-rate` and the
   Memory Map HUD: active rules hit more than once in the last 7 days divided by
   active rules.
+- Added an empty-candidate onboarding path into the seeded Aha demo so first-run
+  users can still see the "agent remembered" moment before entering the console.
 
 ## Performance Changes In This Pass
 

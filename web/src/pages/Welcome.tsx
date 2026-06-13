@@ -249,9 +249,14 @@ export default function Welcome() {
               <div className="text-center py-16">
                 <p className="text-gray-400 mb-2">No initial memories yet</p>
                 <p className="text-sm text-gray-500">Start coding with your agents and Shadow will capture your corrections automatically.</p>
-                <ShadowButton onClick={finishOnboarding} tone="primary" className="mt-6 px-5">
-                  Enter Console -&gt;
-                </ShadowButton>
+                <div className="mt-6 flex flex-col items-center justify-center gap-2 sm:flex-row">
+                  <ShadowButton onClick={skipAll} tone="primary" className="px-5">
+                    View Aha Demo <ArrowRight size={16} />
+                  </ShadowButton>
+                  <ShadowButton onClick={finishOnboarding} tone="subtle" className="px-5">
+                    Enter Console -&gt;
+                  </ShadowButton>
+                </div>
               </div>
             )}
           </div>
