@@ -16,6 +16,7 @@ import (
 	"github.com/joevilcai666/shadow"
 	"github.com/joevilcai666/shadow/internal/adapter"
 	"github.com/joevilcai666/shadow/internal/daemon"
+	"github.com/joevilcai666/shadow/internal/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -635,20 +636,13 @@ var mcpCmd = &cobra.Command{
 	},
 }
 
-// taskRuleItem is the API response shape for active rules.
-type taskRuleItem struct {
-	ID          string   `json:"id"`
-	Content     string   `json:"content"`
-	Scope       string   `json:"scope"`
-	ProjectPath string   `json:"project_path"`
-	Tags        []string `json:"tags"`
-	Category    string   `json:"category"`
-	DecayScore  float64  `json:"decay_score"`
-	Confidence  float64  `json:"confidence"`
-	LastHitAt   string   `json:"last_hit_at"`
-}
-
 // --- shadow task command: memory-assembled task injection ---
+//
+// Wired to the real M8 engine (internal/daemon.TaskCommand), which runs the
+// ContextEngine (tag/scope/recency ranking) and writes the selected rules into
+// the target agent's context file via the adapter layer — same in-process
+// pattern uninstallCmd uses for adapter file operations. Reads the SQLite store
+// directly; WAL (storage.Open) makes this safe alongside a running daemon.
 
 var taskCmd = &cobra.Command{
 	Use:   "task",
@@ -677,31 +671,22 @@ This command:
 		taskDesc := strings.Join(args, " ")
 		projectPath, _ := os.Getwd()
 
-		// Check if daemon is running.
-		client := daemon.NewClient()
-		if !client.IsRunning() {
-			fmt.Println(yellowStyle.Render("⚠ Shadow daemon is not running."))
-			fmt.Println("Run 'shadow start' first.")
-			return nil
-		}
-
-		// Fetch rules from API.
-		rulesResp, err := http.Get("http://localhost:7878/api/rules?status=active&limit=500")
+		// Open the memory store in-process and run the real extract + inject.
+		db, err := storage.Open(storage.DefaultDBPath())
 		if err != nil {
-			return fmt.Errorf("fetch rules: %w", err)
+			return fmt.Errorf("open memory store: %w (run 'shadow start' first)", err)
 		}
-		defer rulesResp.Body.Close()
+		defer db.Close()
 
-		var rules []taskRuleItem
-		if err := json.NewDecoder(rulesResp.Body).Decode(&rules); err != nil {
-			return fmt.Errorf("parse rules: %w", err)
+		tc := daemon.NewTaskCommand(db, storage.NewRuleRepo(db))
+
+		result, err := tc.RunTask(taskDesc, agentName, projectPath)
+		if err != nil {
+			return fmt.Errorf("extract context: %w", err)
 		}
+		rules := result.ExtractedContext.Rules
 
-		// Simple tag extraction from task description.
-		tags := extractTags(taskDesc)
-		filtered := filterRulesTask(rules, tags, projectPath)
-
-		if len(filtered) == 0 {
+		if len(rules) == 0 {
 			fmt.Printf("\n  %s No matching rules found for: %s\n\n",
 				dimStyle.Render("ℹ"), taskDesc)
 			fmt.Printf("  %s\n", dimStyle.Render("Shadow will remember your corrections as you code."))
@@ -709,38 +694,23 @@ This command:
 			return nil
 		}
 
-		// Show preview.
-		fmt.Println()
-		fmt.Println(boldStyle.Render("  📋 Shadow Task Preview"))
-		fmt.Printf("  %s %s\n\n", dimStyle.Render("Task:"), taskDesc)
-		fmt.Printf("  %s %s\n\n", dimStyle.Render("Target:"), agentName)
-		fmt.Println(dimStyle.Render("  Relevant rules:"))
-		for i, r := range filtered {
-			conf := int(r.DecayScore*100)
-			if conf == 0 {
-				conf = int(r.Confidence * 100)
-			}
-			fmt.Printf("  [%d] %s (%d%%)\n", i+1, r.Content, conf)
-			if len(r.Tags) > 0 {
-				fmt.Printf("      Tags: %s\n", strings.Join(r.Tags, ", "))
-			}
+		// Preview & confirm via multi-select TUI.
+		selected := runTaskPreview(rules, taskDesc, agentName)
+		if len(selected) == 0 {
+			fmt.Printf("\n  %s Injection cancelled — no rules selected.\n\n",
+				dimStyle.Render("ℹ"))
+			return nil
 		}
-		fmt.Println()
-		fmt.Printf("  %s\n", dimStyle.Render("Press Enter to inject into "+agentName+", or Ctrl+C to cancel"))
 
-		// Wait for enter.
-		fmt.Scanln()
+		// Inject the selected rules into the target agent's context file.
+		if err := tc.InjectIntoAgent(agentName, selected, projectPath); err != nil {
+			return fmt.Errorf("inject into %s: %w", agentName, err)
+		}
 
-		// Inject rules into agent via API.
-		// NOTE(SHADOW-037): file injection into the agent's context is still
-		// stubbed. But the user just confirmed they want to use these rules for
-		// this task — that is itself a real "hit" signal, so we record it now
-		// (SHADOW-041). It refreshes each rule's decay_score and feeds the
-		// hit-rate metric.
-		markdown := formatRulesForAgent(filtered, agentName)
-		_ = markdown // Would be injected via daemon in full implementation
-
-		for _, r := range filtered {
+		// Record a "hit" per injected rule (SHADOW-041): confirming injection is
+		// itself a usage signal — it refreshes decay_score and feeds the hit-rate
+		// metric. Best-effort via the daemon HTTP API; non-fatal if daemon is down.
+		for _, r := range selected {
 			hitBody, _ := json.Marshal(map[string]any{
 				"agent_name":   agentName,
 				"project_path": projectPath,
@@ -756,123 +726,144 @@ This command:
 
 		fmt.Printf("\n  %s Context injected into %s\n",
 			greenStyle.Render("✓"), agentName)
-		fmt.Printf("  %s %d rules from your memory\n",
-			dimStyle.Render("•"), len(filtered))
+		fmt.Printf("  %s %d rule(s) from your memory", dimStyle.Render("•"), len(selected))
+		if result.ExtractedContext.TotalFound > len(rules) {
+			fmt.Printf(" · %d more matched", result.ExtractedContext.TotalFound-len(rules))
+		}
 		fmt.Println()
-
 		return nil
 	},
 }
 
-func extractTags(text string) []string {
-	keywords := []string{
-		"deploy", "deployment", "staging", "production",
-		"auth", "authentication", "jwt", "oauth", "login",
-		"api", "rest", "graphql", "endpoint",
-		"database", "migration", "schema", "sql",
-		"test", "testing", "unit", "integration",
-		"security", "vulnerability",
-		"performance", "optimization", "cache",
-		"refactor", "cleanup",
-		"bug", "fix", "hotfix",
-		"feature",
-		"docker", "kubernetes", "ci", "cd",
-		"config", "configuration",
-		"docs", "documentation",
+// runTaskPreview runs the multi-select TUI over the candidate rules and returns
+// the rules the user confirmed for injection. Returns nil if cancelled.
+func runTaskPreview(rules []*storage.Rule, taskDesc, agentName string) []*storage.Rule {
+	model := taskModel{
+		items:    rules,
+		selected: make(map[int]bool),
+		task:     taskDesc,
+		agent:    agentName,
 	}
-	text = strings.ToLower(text)
-	var tags []string
-	seen := make(map[string]bool)
-	for _, kw := range keywords {
-		if strings.Contains(text, kw) && !seen[kw] {
-			tags = append(tags, kw)
-			seen[kw] = true
+	// Default-select all candidates — the engine already curated the top
+	// MaxRules, so the common path is "confirm to inject all".
+	for i := range rules {
+		model.selected[i] = true
+	}
+
+	p := tea.NewProgram(model)
+	finalModel, err := p.Run()
+	if err != nil {
+		return nil
+	}
+
+	tm, ok := finalModel.(taskModel)
+	if !ok || tm.cancelled {
+		return nil
+	}
+
+	var picked []*storage.Rule
+	for i, r := range tm.items {
+		if tm.selected[i] {
+			picked = append(picked, r)
 		}
 	}
-	return tags
+	return picked
 }
 
-type ruleForInject struct {
-	ID         string
-	Content    string
-	Scope      string
-	ProjectPath string
-	Tags       []string
-	Category   string
-	DecayScore float64
-	Confidence float64
+// --- task preview TUI: multi-select + confirm inject (SHADOW-036) ---
+
+type taskModel struct {
+	items     []*storage.Rule
+	cursor    int
+	selected  map[int]bool
+	task      string
+	agent     string
+	cancelled bool
 }
 
-func filterRulesTask(rules []taskRuleItem, tags []string, projectPath string) []ruleForInject {
-	type scoredRule struct {
-		rule ruleForInject
-		score float64
-	}
-	var scored []scoredRule
+func (m taskModel) Init() tea.Cmd { return nil }
 
-	for _, r := range rules {
-		var score float64
-		// Tag match.
-		if len(tags) > 0 {
-			for _, want := range tags {
-				for _, got := range r.Tags {
-					if strings.EqualFold(want, got) {
-						score += 0.5
-						break
-					}
-				}
+func (m taskModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c", "q":
+			m.cancelled = true
+			return m, tea.Quit
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
 			}
-		}
-		// Scope match.
-		if r.Scope == "global" {
-			score += 0.2
-		} else if r.ProjectPath != "" && projectPath != "" {
-			if strings.HasPrefix(projectPath, r.ProjectPath) ||
-				strings.HasPrefix(r.ProjectPath, projectPath) {
-				score += 0.3
+		case "down", "j":
+			if m.cursor < len(m.items)-1 {
+				m.cursor++
 			}
-		}
-		if score > 0 {
-			decay := r.DecayScore
-			if decay == 0 {
-				decay = r.Confidence
+		case " ":
+			// Toggle current selection.
+			if len(m.items) > 0 {
+				m.selected[m.cursor] = !m.selected[m.cursor]
 			}
-			scored = append(scored, scoredRule{
-				rule: ruleForInject{
-					ID: r.ID, Content: r.Content, Scope: r.Scope,
-					ProjectPath: r.ProjectPath, Tags: r.Tags,
-					Category: r.Category, DecayScore: r.DecayScore,
-					Confidence: r.Confidence,
-				},
-				score: score * decay,
-			})
+		case "a":
+			for i := range m.items {
+				m.selected[i] = true
+			}
+		case "n":
+			for i := range m.items {
+				m.selected[i] = false
+			}
+		case "enter":
+			return m, tea.Quit
 		}
 	}
-
-	// Sort by score descending.
-	for i := 0; i < len(scored)-1; i++ {
-		for j := i + 1; j < len(scored); j++ {
-			if scored[j].score > scored[i].score {
-				scored[i], scored[j] = scored[j], scored[i]
-			}
-		}
-	}
-
-	result := make([]ruleForInject, 0, 5)
-	for i := 0; i < len(scored) && i < 5; i++ {
-		result = append(result, scored[i].rule)
-	}
-	return result
+	return m, nil
 }
 
-func formatRulesForAgent(rules []ruleForInject, agentName string) string {
-	var sb strings.Builder
-	sb.WriteString("## Shadow Memory — Relevant Rules\n\n")
-	for i, r := range rules {
-		sb.WriteString(fmt.Sprintf("### [%d] %s\n", i+1, r.Category))
-		sb.WriteString(r.Content + "\n\n")
+func (m taskModel) View() string {
+	var b strings.Builder
+	b.WriteString(boldStyle.Render("  📋 Shadow Task Preview") + "\n")
+	b.WriteString(fmt.Sprintf("  %s %s\n", dimStyle.Render("Task:"), truncateStr(m.task, 64)))
+	b.WriteString(fmt.Sprintf("  %s %s\n\n", dimStyle.Render("Target:"), m.agent))
+	b.WriteString(dimStyle.Render("  space=toggle  a=all  n=none  ↑↓=move  enter=inject  q=cancel") + "\n\n")
+
+	for i, r := range m.items {
+		cursor := " "
+		if i == m.cursor {
+			cursor = yellowStyle.Render("▸")
+		}
+		mark := dimStyle.Render("▫")
+		if m.selected[i] {
+			mark = greenStyle.Render("✓")
+		}
+		conf := r.DecayScore
+		if conf == 0 {
+			conf = r.Confidence
+		}
+		meta := dimStyle.Render(fmt.Sprintf("%3.0f%% · %s", conf*100, r.Scope))
+		if len(r.Tags) > 0 {
+			meta += dimStyle.Render(fmt.Sprintf(" · #%s", strings.Join(r.Tags, " #")))
+		}
+		b.WriteString(fmt.Sprintf("  %s [%s] %s  %s\n", cursor, mark, meta, r.Content))
 	}
-	return sb.String()
+
+	selected := 0
+	for _, v := range m.selected {
+		if v {
+			selected++
+		}
+	}
+	b.WriteString("\n")
+	b.WriteString(dimStyle.Render(fmt.Sprintf("  %d of %d selected · enter to inject into %s",
+		selected, len(m.items), m.agent)))
+	b.WriteString("\n")
+	return b.String()
+}
+
+// truncateStr clips s to n runes, appending an ellipsis if truncated.
+func truncateStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
 }
 
 // --- shadow store command: conversational rule crystallization ---
