@@ -405,6 +405,7 @@ func (s *Server) createMemory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.wsHub.Broadcast(map[string]any{"event": "memory.created", "memory_id": m.ID})
+	s.triggerAdapterSync()
 	writeJSON(w, http.StatusCreated, m)
 }
 
@@ -426,9 +427,17 @@ func (s *Server) listMemories(w http.ResponseWriter, r *http.Request) {
 // deleteMemory removes a user memory by id.
 func (s *Server) deleteMemory(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["id"]
+	existing, err := s.userMemoryRepo.GetByID(id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	if err := s.userMemoryRepo.Delete(id); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if existing != nil {
+		s.triggerAdapterSync()
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

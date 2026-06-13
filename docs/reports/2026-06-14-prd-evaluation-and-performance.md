@@ -66,6 +66,8 @@ and the dashboard hit-rate summary.
   instead of only storing/exporting the memory.
 - Added regression coverage for user-memory privacy rejection, verifying that
   sensitive memory content is rejected before persistence.
+- User-memory create/delete now triggers adapter sync so always-active personal
+  context is written to native agent files immediately after changes.
 
 ## Performance Changes In This Pass
 

@@ -1054,6 +1054,44 @@ func TestCreateMemoryRejectsSensitiveData(t *testing.T) {
 	}
 }
 
+func TestMemoryChangesTriggerAdapterSync(t *testing.T) {
+	s, _ := testEnv(t)
+	syncs := 0
+	s.SetControlHooks(nil, func() error {
+		syncs++
+		return nil
+	})
+
+	payload, _ := json.Marshal(map[string]any{
+		"content":  "Prefer table-driven tests for Go handlers",
+		"category": "preference",
+	})
+	req := newLocalRequest("POST", "/api/memories", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create status: got %d, want %d. body: %s", w.Code, http.StatusCreated, w.Body.String())
+	}
+	if syncs != 1 {
+		t.Fatalf("adapter sync calls after create = %d, want 1", syncs)
+	}
+
+	var created storage.UserMemory
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created memory: %v", err)
+	}
+	req = newLocalRequest("DELETE", "/api/memories/"+created.ID, nil)
+	w = httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("delete status: got %d, want %d. body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if syncs != 2 {
+		t.Fatalf("adapter sync calls after delete = %d, want 2", syncs)
+	}
+}
+
 // MARK: - Hit rate (SHADOW-041)
 
 func TestRecordRuleHitRefreshesDecay(t *testing.T) {
