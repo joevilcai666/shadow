@@ -53,6 +53,7 @@ export function MemoryMap({ onOpenInRules, nodes: propNodes, relations: propRela
     category: 'all',
     status: 'all',
     agent: 'all',
+    edgeDensity: 0.4,   // 默认：信号线 + 每节点 top-3 结构线（做减法）
   });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showHint, setShowHint] = useState(true);
@@ -85,6 +86,68 @@ export function MemoryMap({ onOpenInRules, nodes: propNodes, relations: propRela
 
   const isSearchingOrFiltering = searchQuery.trim() !== '' || filters.category !== 'all' || filters.status !== 'all';
 
+  // === 做减法筛子：基于 edgeDensity 决定哪些边可见 ===
+  // signal → 永远显示；structure → 默认每节点 top-3；whisper → 按需
+  const visibleEdgeIndices = useMemo(() => {
+    const density = filters.edgeDensity;
+    const signalVisible = density >= 0.05;
+    const structureVisible = density >= 0.2;
+    const structureAll = density >= 0.5;
+    const whisperVisible = density >= 0.6;
+    const whisperAll = density >= 0.9;
+
+    const result = new Set<number>();
+    // 待 top-N 过滤的边（按节点收集）
+    const byNode = new Map<string, Array<{ idx: number; score: number; tier: string }>>();
+
+    dataRelations.forEach((r, idx) => {
+      // tier 解析（兼容旧 kind 字段）
+      const tier = r.data.tier ?? (r.data.kind === 'weak' ? 'whisper' : 'structure');
+      const score = r.data.score ?? (tier === 'structure' ? 0.5 : 0.2);
+
+      // 无 top-N 限制直接放行
+      if (tier === 'signal' && signalVisible) { result.add(idx); return; }
+      if (tier === 'structure' && structureAll) { result.add(idx); return; }
+      if (tier === 'whisper' && whisperAll) { result.add(idx); return; }
+
+      // 需要 top-N 过滤的
+      if ((tier === 'structure' && structureVisible) || (tier === 'whisper' && whisperVisible)) {
+        for (const nodeId of [r.source, r.target]) {
+          if (!byNode.has(nodeId)) byNode.set(nodeId, []);
+          byNode.get(nodeId)!.push({ idx, score, tier });
+        }
+      }
+    });
+
+    // 每节点取 top-N（score 降序）
+    const STRUCT_LIMIT = 3;
+    const WHISPER_LIMIT = 2;
+    for (const nodeEdges of byNode.values()) {
+      nodeEdges.sort((a, b) => b.score - a.score);
+      let structCount = 0;
+      let whisperCount = 0;
+      for (const e of nodeEdges) {
+        if (e.tier === 'structure' && structCount < STRUCT_LIMIT) {
+          result.add(e.idx); structCount++;
+        } else if (e.tier === 'whisper' && whisperCount < WHISPER_LIMIT) {
+          result.add(e.idx); whisperCount++;
+        }
+      }
+    }
+    return result;
+  }, [dataRelations, filters.edgeDensity]);
+
+  // === Focus Mode：选中节点的全部关联（跨所有 tier，忽略密度）===
+  const connectedToSelected = useMemo(() => {
+    if (selectedId === null) return null;
+    const set = new Set<string>([selectedId]);
+    for (const r of dataRelations) {
+      if (r.source === selectedId) set.add(r.target);
+      if (r.target === selectedId) set.add(r.source);
+    }
+    return set;
+  }, [selectedId, dataRelations]);
+
   // 拖动状态：用于 CSS 全局反馈
   const [isAnyDragging, setIsAnyDragging] = useState(false);
 
@@ -114,7 +177,10 @@ export function MemoryMap({ onOpenInRules, nodes: propNodes, relations: propRela
       const base = positions[n.id] ?? { x: 0, y: 0 };
       const off = pushOffsets[n.id];
       const matched = matches.has(n.id);
-      const dimmed = isSearchingOrFiltering && !matched;
+      // Focus Mode 优先于搜索：未与选中节点关联的节点淡出
+      const dimmed = connectedToSelected !== null
+        ? !connectedToSelected.has(n.id)
+        : (isSearchingOrFiltering && !matched);
       return {
         id: n.id,
         type: 'rule',
@@ -129,15 +195,26 @@ export function MemoryMap({ onOpenInRules, nodes: propNodes, relations: propRela
         draggable: true,
       } as Node<MemoryNodeData & { pushOffsetX?: number; pushOffsetY?: number }>;
     });
-  }, [positions, pushOffsets, matches, isSearchingOrFiltering, selectedId]);
+  }, [positions, pushOffsets, matches, isSearchingOrFiltering, selectedId, connectedToSelected]);
 
   // 构建 React Flow edges
   const edges: Edge<RelationData>[] = useMemo(() => {
-    return dataRelations.map((r, i) => {
+    const result: Edge<RelationData>[] = [];
+    dataRelations.forEach((r, i) => {
       const sourceInMatch = matches.has(r.source);
       const targetInMatch = matches.has(r.target);
+
+      // 可见性：Focus Mode 只渲染选中节点的关联；否则用密度筛子
+      let visible: boolean;
+      if (connectedToSelected !== null) {
+        visible = r.source === selectedId || r.target === selectedId;
+      } else {
+        visible = visibleEdgeIndices.has(i);
+      }
+      if (!visible) return;
+
       const dimmed = isSearchingOrFiltering && !(sourceInMatch && targetInMatch);
-      return {
+      result.push({
         id: `e${i}-${r.source}-${r.target}`,
         source: r.source,
         target: r.target,
@@ -145,9 +222,10 @@ export function MemoryMap({ onOpenInRules, nodes: propNodes, relations: propRela
         data: r.data,
         className: dimmed ? 'mm-edge--dimmed' : '',
         selected: false,
-      } as Edge<RelationData>;
+      } as Edge<RelationData>);
     });
-  }, [matches, isSearchingOrFiltering]);
+    return result;
+  }, [matches, isSearchingOrFiltering, visibleEdgeIndices, connectedToSelected, selectedId, dataRelations]);
 
   // 节点点击
   const handleNodeClick: NodeMouseHandler = useCallback((_e, node) => {
@@ -330,16 +408,16 @@ function Legend() {
       <div className="mm-legend-section">
         <div className="mm-legend-title">关联</div>
         <div className="mm-legend-row">
-          <div className="mm-legend-line mm-legend-line--strong" />
-          <span>同项目</span>
+          <div className="mm-legend-line mm-legend-line--signal" />
+          <span>⚡ 冲突</span>
         </div>
         <div className="mm-legend-row">
-          <div className="mm-legend-line mm-legend-line--medium" />
-          <span>共享标签</span>
+          <div className="mm-legend-line mm-legend-line--structure" />
+          <span>🔗 结构</span>
         </div>
         <div className="mm-legend-row">
-          <div className="mm-legend-line mm-legend-line--weak" />
-          <span>语义相似</span>
+          <div className="mm-legend-line mm-legend-line--whisper" />
+          <span>💬 低语</span>
         </div>
       </div>
     </div>

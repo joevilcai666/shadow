@@ -471,7 +471,8 @@ func TestDashboardMapEmpty(t *testing.T) {
 func TestDashboardMapEdgesFromTagOverlap(t *testing.T) {
 	s, _ := testEnv(t)
 
-	// Two rules sharing the "pnpm" tag should produce a medium edge.
+	// Two rules sharing the "pnpm" tag should produce a whisper edge
+	// (1 shared tag, no project → never "strong"; 做减法 sieve).
 	for i, content := range []string{"Use pnpm not npm", "Always commit lockfile"} {
 		body, _ := json.Marshal(map[string]any{
 			"content":    content,
@@ -491,7 +492,7 @@ func TestDashboardMapEdgesFromTagOverlap(t *testing.T) {
 		}
 	}
 
-	// A third rule with no shared tags — should NOT be linked.
+	// A third rule with no shared tags — should NOT be linked (hidden tier).
 	body, _ := json.Marshal(map[string]any{
 		"content":    "Use camelCase not snake_case",
 		"scope":      "global",
@@ -524,9 +525,95 @@ func TestDashboardMapEdgesFromTagOverlap(t *testing.T) {
 	if len(edges) == 1 {
 		e := edges[0].(map[string]any)
 		data := e["data"].(map[string]any)
-		if data["kind"] != "medium" {
-			t.Errorf("edge kind = %v, want medium (1 shared tag)", data["kind"])
+		if data["tier"] != "whisper" {
+			t.Errorf("edge tier = %v, want whisper (1 shared tag, no project)", data["tier"])
 		}
+	}
+	// edgeStats reports the sieve breakdown (做减法 transparency).
+	if stats, ok := resp["edgeStats"].(map[string]any); ok {
+		if stats["hidden"].(float64) < 1 {
+			t.Errorf("edgeStats hidden = %v, want >=1 (the naming rule pairs)", stats["hidden"])
+		}
+	} else {
+		t.Error("expected edgeStats in map response")
+	}
+}
+
+func TestDashboardMapSieveTiers(t *testing.T) {
+	s, _ := testEnv(t)
+
+	// Two rules in the same project sharing 3 tags → structure tier.
+	for _, content := range []string{"Rule A three tags", "Rule B three tags"} {
+		body, _ := json.Marshal(map[string]any{
+			"content":      content,
+			"scope":        "project",
+			"project_path": "/proj/x",
+			"tags":         []string{"a", "b", "c"},
+			"category":     "code-style",
+			"confidence":   0.9,
+			"status":       "active",
+		})
+		req := newLocalRequest("POST", "/api/rules", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.router.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("seed status: %d", w.Code)
+		}
+	}
+
+	// A conflicted rule in the same project sharing tags → signal conflict edge.
+	body, _ := json.Marshal(map[string]any{
+		"content":      "Conflicting rule",
+		"scope":        "project",
+		"project_path": "/proj/x",
+		"tags":         []string{"a"},
+		"category":     "code-style",
+		"confidence":   0.5,
+		"status":       "conflicted",
+	})
+	req := newLocalRequest("POST", "/api/rules", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("seed conflicted status: %d", w.Code)
+	}
+
+	req = newLocalRequest("GET", "/api/dashboard/map", nil)
+	w = httptest.NewRecorder()
+	s.router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("map status: %d", w.Code)
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	edges := resp["edges"].([]any)
+	var gotSignal, gotStructure, gotWhisper bool
+	for _, raw := range edges {
+		e := raw.(map[string]any)
+		data := e["data"].(map[string]any)
+		switch data["tier"] {
+		case "signal":
+			gotSignal = true
+			if data["signalType"] != "conflict" {
+				t.Errorf("signalType = %v, want conflict", data["signalType"])
+			}
+		case "structure":
+			gotStructure = true
+		case "whisper":
+			gotWhisper = true
+		}
+	}
+	if !gotSignal {
+		t.Error("expected at least one signal (conflict) edge")
+	}
+	if !gotStructure {
+		t.Error("expected at least one structure edge (3 shared tags)")
+	}
+	if !gotWhisper {
+		t.Error("expected at least one whisper edge (conflicted rule shares 1 tag with peers)")
 	}
 }
 

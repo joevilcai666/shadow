@@ -77,10 +77,19 @@ export interface DashboardMapEdge {
   data: unknown;
 }
 
+// 关联线分层统计（做减法透明度：让用户看到多少线被筛掉了）
+export interface DashboardMapEdgeStats {
+  signal: number;
+  structure: number;
+  whisper: number;
+  hidden: number;
+}
+
 export interface DashboardMapData {
   nodes: unknown[];
   edges: DashboardMapEdge[];
   generated: number;
+  edgeStats?: DashboardMapEdgeStats;
 }
 
 export interface Adapter {

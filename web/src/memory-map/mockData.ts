@@ -250,42 +250,34 @@ export const MOCK_NODES: MemoryNodeData[] = [
   },
 ];
 
-// 关联关系（手工标注，模拟"算法"计算结果）
-// strong = 同项目, medium = 共享标签（≥2）, weak = 语义相似
+// 关联关系（手工标注，模拟后端 edgeScore + tier 分类结果）
+// tier = signal（冲突/进化，永远显示）/ structure（强关联，默认 top-3）/ whisper（弱关联，按需）
+// score 用于 tier 内排序（前端 top-N）
 export const MOCK_RELATIONS: Array<{ source: string; target: string; data: RelationData }> = [
-  // strong: 同项目
-  { source: 'r1', target: 'r2', data: { kind: 'strong', reason: 'my-app' } },
-  { source: 'r1', target: 'r3', data: { kind: 'strong', reason: 'my-app' } },
-  { source: 'r1', target: 'r13', data: { kind: 'strong', reason: 'my-app' } },
-  { source: 'r2', target: 'r13', data: { kind: 'strong', reason: 'my-app' } },
-  { source: 'r7', target: 'r8', data: { kind: 'strong', reason: 'my-app' } },
-  { source: 'r7', target: 'r9', data: { kind: 'strong', reason: 'my-app' } },
-  { source: 'r7', target: 'r10', data: { kind: 'strong', reason: 'my-app' } },
-  { source: 'r8', target: 'r10', data: { kind: 'strong', reason: 'my-app' } },
-  { source: 'r9', target: 'r10', data: { kind: 'strong', reason: 'my-app' } },
-  { source: 'r4', target: 'r5', data: { kind: 'strong', reason: 'api-server' } },
-  { source: 'r4', target: 'r14', data: { kind: 'strong', reason: 'api-server' } },
-  { source: 'r5', target: 'r14', data: { kind: 'strong', reason: 'api-server' } },
-  { source: 'r5', target: 'r15', data: { kind: 'strong', reason: 'api-server' } },
-  { source: 'r14', target: 'r15', data: { kind: 'strong', reason: 'api-server' } },
-  { source: 'r11', target: 'r12', data: { kind: 'strong', reason: 'web-app' } },
+  // === signal: 冲突（永远显示，红色脉冲）===
+  { source: 'r11', target: 'r12', data: { tier: 'signal', signalType: 'conflict', score: 1.0, reason: '冲突：同项目矛盾规则' } },
 
-  // medium: 共享多个标签
-  { source: 'r1', target: 'r13', data: { kind: 'medium', reason: '#typescript' } },
-  { source: 'r2', target: 'r3', data: { kind: 'medium', reason: '#typescript #style' } },
-  { source: 'r4', target: 'r5', data: { kind: 'medium', reason: '#pattern' } },
-  { source: 'r4', target: 'r6', data: { kind: 'medium', reason: '#pattern' } },
-  { source: 'r7', target: 'r8', data: { kind: 'medium', reason: '#tooling' } },
-  { source: 'r8', target: 'r10', data: { kind: 'medium', reason: '#tooling' } },
-  { source: 'r8', target: 'r15', data: { kind: 'medium', reason: '#tooling' } },
-  { source: 'r11', target: 'r4', data: { kind: 'medium', reason: '#pattern' } },
+  // === structure: 强关联（同项目 + 多共享标签，默认可见）===
+  { source: 'r1', target: 'r2', data: { tier: 'structure', score: 0.85, reason: 'same project · my-app' } },
+  { source: 'r1', target: 'r3', data: { tier: 'structure', score: 0.82, reason: 'same project · my-app' } },
+  { source: 'r1', target: 'r13', data: { tier: 'structure', score: 0.88, reason: 'same project · shared 2 tag(s)' } },
+  { source: 'r2', target: 'r3', data: { tier: 'structure', score: 0.80, reason: 'same project · shared 2 tag(s)' } },
+  { source: 'r2', target: 'r13', data: { tier: 'structure', score: 0.84, reason: 'same project · shared 2 tag(s)' } },
+  { source: 'r7', target: 'r8', data: { tier: 'structure', score: 0.78, reason: 'same project · my-app' } },
+  { source: 'r7', target: 'r9', data: { tier: 'structure', score: 0.72, reason: 'same project · my-app' } },
+  { source: 'r8', target: 'r10', data: { tier: 'structure', score: 0.75, reason: 'same project · shared 1 tag(s)' } },
+  { source: 'r9', target: 'r10', data: { tier: 'structure', score: 0.74, reason: 'same project · shared 1 tag(s)' } },
+  { source: 'r4', target: 'r5', data: { tier: 'structure', score: 0.83, reason: 'same project · shared 2 tag(s)' } },
+  { source: 'r4', target: 'r14', data: { tier: 'structure', score: 0.76, reason: 'same project · api-server' } },
+  { source: 'r5', target: 'r14', data: { tier: 'structure', score: 0.74, reason: 'same project · api-server' } },
 
-  // weak: 语义相似
-  { source: 'r1', target: 'r7', data: { kind: 'weak', reason: '项目规范' } },
-  { source: 'r2', target: 'r13', data: { kind: 'weak', reason: '类型严谨' } },
-  { source: 'r4', target: 'r12', data: { kind: 'weak', reason: '模式选择' } },
-  { source: 'r6', target: 'r12', data: { kind: 'weak', reason: '状态管理' } },
-  { source: 'r9', target: 'r10', data: { kind: 'weak', reason: '提交流程' } },
+  // === whisper: 弱关联（单共享标签 / 语义相似，按需显示）===
+  { source: 'r4', target: 'r6', data: { tier: 'whisper', score: 0.32, reason: 'shared 1 tag(s): #pattern' } },
+  { source: 'r8', target: 'r15', data: { tier: 'whisper', score: 0.28, reason: 'shared 1 tag(s): #tooling' } },
+  { source: 'r11', target: 'r4', data: { tier: 'whisper', score: 0.26, reason: 'shared 1 tag(s): #pattern' } },
+  { source: 'r1', target: 'r7', data: { tier: 'whisper', score: 0.22, reason: '语义相似：项目规范' } },
+  { source: 'r4', target: 'r12', data: { tier: 'whisper', score: 0.20, reason: '语义相似：模式选择' } },
+  { source: 'r6', target: 'r12', data: { tier: 'whisper', score: 0.18, reason: '语义相似：状态管理' } },
 ];
 
 const ACHIEVEMENTS = [

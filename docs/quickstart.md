@@ -26,7 +26,7 @@ Verify:
 
 ```bash
 shadow version
-# Shadow 0.2.0
+# Shadow 0.3.0
 ```
 
 ### Option B: Binary download
@@ -37,7 +37,7 @@ shadow version
 
 ```bash
 # macOS Apple Silicon example
-tar xzf shadow_0.2.0_darwin_arm64.tar.gz
+tar xzf shadow_0.3.0_darwin_arm64.tar.gz
 sudo mv shadow /usr/local/bin/
 ```
 

@@ -154,6 +154,20 @@
   stroke-opacity: 0.12;
 }
 
+/* === 关联线脉冲（信号线 · 冲突）===
+ * 唯一带动画的线：opacity 呼吸 = "我在这里，请处理我"
+ * CSS animation 覆盖 inline opacity，所以脉冲优先于基础透明度
+ */
+@keyframes mm-edge-conflict-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1.0; }
+}
+
+/* 焦点模式：选中节点时，非关联边极淡 */
+.mm-flow .react-flow__edge.mm-edge--focus-dim .react-flow__edge-path {
+  stroke-opacity: 0.06;
+}
+
 /* === 自定义节点 ===
  * Transform 类（scale/translate）交给 framer-motion，CSS 只管 filter / box-shadow / cursor
  * 否则 framer-motion 的 style.x/y 会跟 CSS transform 冲突
@@ -766,9 +780,68 @@
   flex-shrink: 0;
 }
 
-.mm-legend-line--strong { border-top: 2px solid var(--rel-strong); }
-.mm-legend-line--medium { border-top: 1px solid var(--rel-medium); }
-.mm-legend-line--weak { border-top: 1px dashed var(--rel-weak); }
+.mm-legend-line--signal { border-top: 2.5px solid #EF4444; }
+.mm-legend-line--structure { border-top: 1.5px solid var(--rel-medium); }
+.mm-legend-line--whisper { border-top: 1px dashed var(--rel-weak); }
+
+/* === 关联密度滑块（做减法核心交互）=== */
+.mm-density {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+
+.mm-density-label {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.mm-density-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 84px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.mm-density-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--brand);
+  cursor: pointer;
+  border: 2px solid var(--bg-canvas);
+  box-shadow: 0 0 0 1px var(--brand);
+  transition: transform var(--duration-fast) var(--ease-out-quart);
+}
+
+.mm-density-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.25);
+}
+
+.mm-density-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--brand);
+  cursor: pointer;
+  border: 2px solid var(--bg-canvas);
+}
+
+.mm-density-value {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  min-width: 38px;
+}
 
 /* === 提示 toast === */
 .mm-toast {

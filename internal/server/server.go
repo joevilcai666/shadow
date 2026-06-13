@@ -549,8 +549,14 @@ func (s *Server) getDashboard(w http.ResponseWriter, r *http.Request) {
 // getDashboardMap powers the Memory Map canvas (web/src/pages/MemoryMapPage).
 //
 // It returns every rule translated into the React-Flow-shaped node the
-// frontend expects (MemoryNodeData) plus a list of edges derived from
-// tag overlap (>=1 shared tag = "medium" relation, >=2 = "strong").
+// frontend expects (MemoryNodeData) plus a list of edges classified into
+// a 3-tier "sieve" (做减法 philosophy):
+//
+//   - signal:    conflict edges — always rendered (alerts, not info)
+//   - structure: strong relations — shown by default (top-N per node)
+//   - whisper:   weak relations — shown on demand
+//   - hidden:    no tag overlap + no conflict — never generated
+//
 // The frontend's category mapping is intentionally loose — we map our
 // internal category vocabulary to the 3 frontend buckets (code /
 // architecture / practice) by simple keyword match; otherwise the rule
@@ -583,30 +589,72 @@ func (s *Server) getDashboardMap(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	// Build edges from tag overlap. O(n^2) over tag sets is fine at
-	// v1 scale (<500 rules). Each pair appears at most once.
 	edges := []map[string]any{}
+	stats := map[string]int{"signal": 0, "structure": 0, "whisper": 0, "hidden": 0}
+
+	// Pass 1 — conflict signal edges. For each conflicted rule, link it to
+	// its single most-similar peer in the same project. One conflict edge
+	// per conflicted rule keeps the "sieve" honest (做减法: a conflict is an
+	// alert, not a graph explosion).
+	for i := range rules {
+		if rules[i].Status != "conflicted" {
+			continue
+		}
+		bestJ, bestShared := -1, 0
+		for j := range rules {
+			if i == j {
+				continue
+			}
+			if rules[i].ProjectPath == "" || rules[i].ProjectPath != rules[j].ProjectPath {
+				continue
+			}
+			if s := tagOverlap(rules[i].Tags, rules[j].Tags); s > bestShared {
+				bestShared, bestJ = s, j
+			}
+		}
+		if bestJ >= 0 && bestShared > 0 {
+			edges = append(edges, map[string]any{
+				"source": rules[i].ID,
+				"target": rules[bestJ].ID,
+				"data": map[string]any{
+					"tier":       "signal",
+					"signalType": "conflict",
+					"score":      1.0,
+					"reason":     "冲突：同项目矛盾规则",
+				},
+			})
+			stats["signal"]++
+		}
+	}
+
+	// Pass 2 — tag-overlap edges (structure / whisper). O(n^2) over tag
+	// sets is fine at v1 scale (<500 rules). Each pair appears at most once.
 	for i := 0; i < len(rules); i++ {
 		for j := i + 1; j < len(rules); j++ {
 			shared := tagOverlap(rules[i].Tags, rules[j].Tags)
 			if shared == 0 {
+				// No structural connection and (handled above) no conflict.
+				// This is the "hidden" tier — we don't even generate it.
+				stats["hidden"]++
 				continue
 			}
-			kind := "weak"
-			switch {
-			case shared >= 2:
-				kind = "strong"
-			case shared == 1:
-				kind = "medium"
+			sameProject := rules[i].ProjectPath != "" && rules[i].ProjectPath == rules[j].ProjectPath
+
+			tier, score, reason := classifyEdge(shared, len(rules[i].Tags), len(rules[j].Tags), sameProject)
+			if tier == "hidden" {
+				stats["hidden"]++
+				continue
 			}
 			edges = append(edges, map[string]any{
 				"source": rules[i].ID,
 				"target": rules[j].ID,
 				"data": map[string]any{
-					"kind":   kind,
-					"reason": "shared " + itoa(shared) + " tag(s)",
+					"tier":   tier,
+					"score":  score,
+					"reason": reason,
 				},
 			})
+			stats[tier]++
 		}
 	}
 
@@ -614,7 +662,52 @@ func (s *Server) getDashboardMap(w http.ResponseWriter, r *http.Request) {
 		"nodes":     nodes,
 		"edges":     edges,
 		"generated": len(nodes),
+		"edgeStats": map[string]int{
+			"signal":    stats["signal"],
+			"structure": stats["structure"],
+			"whisper":   stats["whisper"],
+			"hidden":    stats["hidden"],
+		},
 	})
+}
+
+// classifyEdge maps a tag-overlap pair onto a sieve tier.
+//
+// Rule (逻辑是底线 — each branch is verifiable):
+//   - shared >= 3 tags           → structure (strong tag cluster)
+//   - shared == 2 + same project → structure
+//   - shared == 2 (cross-project)→ whisper
+//   - shared == 1                → whisper (a single shared tag is never "strong")
+//
+// score is used by the frontend to rank edges within a tier (top-N).
+func classifyEdge(shared, tagsA, tagsB int, sameProject bool) (tier string, score float64, reason string) {
+	maxTags := tagsA
+	if tagsB > maxTags {
+		maxTags = tagsB
+	}
+	if maxTags == 0 {
+		maxTags = 1
+	}
+	score = float64(shared)/float64(maxTags)
+	if sameProject {
+		score += 0.2
+	}
+	reason = "shared " + itoa(shared) + " tag(s)"
+	if sameProject {
+		reason = "same project · " + reason
+	}
+
+	switch {
+	case shared >= 3:
+		return "structure", score, reason
+	case shared == 2:
+		if sameProject {
+			return "structure", score, reason
+		}
+		return "whisper", score, reason
+	default: // shared == 1
+		return "whisper", score, reason
+	}
 }
 
 // --- dashboard/map helpers ---

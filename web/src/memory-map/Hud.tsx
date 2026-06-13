@@ -1,10 +1,19 @@
-// 浮动 HUD — 统计 + 搜索 + 筛选 + 成长进度条
+// 浮动 HUD — 统计 + 搜索 + 筛选 + 关联密度 + 成长进度条
 // 毛玻璃 + 顶部居中
 
 import { Input, Dropdown } from '@heroui/react';
 import { Search, X, Filter } from 'lucide-react';
 import type { MapStats, MapFilters, Category } from './types';
 import { ShadowButton } from '../components/ui';
+
+// 密度滑块标签：把 0-1 数值映射成人类可读的层级名
+function densityLabel(d: number): string {
+  if (d < 0.1) return '仅信号';
+  if (d < 0.5) return '结构';
+  if (d < 0.6) return '结构全';
+  if (d < 0.9) return '低语';
+  return '全部';
+}
 
 const CATEGORIES: Array<{ key: Category | 'all'; label: string; cls: string }> = [
   { key: 'all', label: '全部', cls: '' },
@@ -158,6 +167,22 @@ export function Hud({
             </Dropdown.Menu>
           </Dropdown.Popover>
         </Dropdown>
+
+        {/* 关联密度滑块（做减法核心交互：单一滑块控制渐进式披露）*/}
+        <div className="mm-density" title="关联密度：拖动揭示更多关联线">
+          <span className="mm-density-label">关联</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={filters.edgeDensity}
+            onChange={e => onFilterChange({ ...filters, edgeDensity: parseFloat(e.target.value) })}
+            className="mm-density-slider"
+            aria-label="关联密度"
+          />
+          <span className="mm-density-value">{densityLabel(filters.edgeDensity)}</span>
+        </div>
       </div>
     </div>
   );
