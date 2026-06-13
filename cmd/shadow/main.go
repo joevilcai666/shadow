@@ -536,6 +536,10 @@ func runSync(opts syncOptions) error {
 	if err != nil {
 		return fmt.Errorf("list projects: %w", err)
 	}
+	projectRulesByPath, err := ruleRepo.ActiveProjectRulesByPath()
+	if err != nil {
+		return fmt.Errorf("list project rules: %w", err)
+	}
 
 	backupDir := filepath.Join(opts.homeDir, "backups")
 	adapters := []adapter.Adapter{
@@ -572,14 +576,7 @@ func runSync(opts syncOptions) error {
 			if !projectIncludesAgent(p, a.Name()) {
 				continue
 			}
-			projectRules, err := ruleRepo.List(storage.RuleFilter{
-				Status:      "active",
-				Scope:       "project",
-				ProjectPath: p.Path,
-			})
-			if err != nil {
-				return fmt.Errorf("list project rules for %s: %w", p.Path, err)
-			}
+			projectRules := projectRulesByPath[p.Path]
 			if len(projectRules) == 0 {
 				continue
 			}

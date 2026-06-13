@@ -255,6 +255,59 @@ func TestRuleStatusCounts(t *testing.T) {
 	}
 }
 
+func TestRuleRepoActiveProjectRulesByPath(t *testing.T) {
+	db := openTestDB(t)
+	repo := NewRuleRepo(db)
+
+	for _, rule := range []*Rule{
+		{
+			ID: NewID(), Content: "project A active 1", Scope: "project", ProjectPath: "/repo/a",
+			Tags: []string{}, Status: "active", Version: 1, CreatedAt: Now(), UpdatedAt: Now(),
+		},
+		{
+			ID: NewID(), Content: "project A active 2", Scope: "project", ProjectPath: "/repo/a",
+			Tags: []string{}, Status: "active", Version: 1, CreatedAt: Now(), UpdatedAt: Now(),
+		},
+		{
+			ID: NewID(), Content: "project B active", Scope: "project", ProjectPath: "/repo/b",
+			Tags: []string{}, Status: "active", Version: 1, CreatedAt: Now(), UpdatedAt: Now(),
+		},
+		{
+			ID: NewID(), Content: "candidate excluded", Scope: "project", ProjectPath: "/repo/a",
+			Tags: []string{}, Status: "candidate", Version: 1, CreatedAt: Now(), UpdatedAt: Now(),
+		},
+		{
+			ID: NewID(), Content: "global excluded", Scope: "global",
+			Tags: []string{}, Status: "active", Version: 1, CreatedAt: Now(), UpdatedAt: Now(),
+		},
+	} {
+		if err := repo.Create(rule); err != nil {
+			t.Fatalf("create %q: %v", rule.Content, err)
+		}
+	}
+
+	byPath, err := repo.ActiveProjectRulesByPath()
+	if err != nil {
+		t.Fatalf("active project rules by path: %v", err)
+	}
+	if len(byPath["/repo/a"]) != 2 {
+		t.Fatalf("/repo/a rules = %d, want 2", len(byPath["/repo/a"]))
+	}
+	if len(byPath["/repo/b"]) != 1 {
+		t.Fatalf("/repo/b rules = %d, want 1", len(byPath["/repo/b"]))
+	}
+	if _, ok := byPath[""]; ok {
+		t.Fatalf("global rule should not be grouped under empty path: %#v", byPath[""])
+	}
+	for _, rules := range byPath {
+		for _, rule := range rules {
+			if rule.Scope != "project" || rule.Status != "active" {
+				t.Fatalf("unexpected grouped rule: %#v", rule)
+			}
+		}
+	}
+}
+
 func TestSourceTimeline(t *testing.T) {
 	db := openTestDB(t)
 	ruleRepo := NewRuleRepo(db)

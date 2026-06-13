@@ -70,6 +70,8 @@ and the dashboard hit-rate summary.
   reducing allocations in the hottest loop.
 - The map API keeps its rule limit at 300 and caps structure/whisper edges per
   node so a shared tag cannot produce an explosive complete graph.
+- Adapter sync now loads active project rules once and groups them by project
+  path, avoiding a repeated project-rule query for every adapter/project pair.
 - The React memory map computes layout in a Web Worker and defaults to a reduced
   edge density so initial render prioritizes signal and structure edges.
 - Embedded static assets were rebuilt from a clean `web/dist`, removing stale

@@ -249,6 +249,34 @@ func (r *RuleRepo) StatusCounts() (RuleStatusCounts, error) {
 	return counts, rows.Err()
 }
 
+// ActiveProjectRulesByPath returns all active project-scoped rules grouped by
+// project path with one rules table scan. Adapter sync uses this to avoid
+// querying once per project per adapter.
+func (r *RuleRepo) ActiveProjectRulesByPath() (map[string][]*Rule, error) {
+	rows, err := r.db.Query(`SELECT id, content, scope, COALESCE(project_path,''), tags, COALESCE(category,''),
+	              COALESCE(trigger_context,''), confidence, status, version,
+	              COALESCE(importance,0.5), COALESCE(decay_score,0), COALESCE(last_hit_at,''),
+	              COALESCE(source_paths,'[]'), COALESCE(author,'agent'),
+	              created_at, updated_at
+	      FROM rules
+	      WHERE status = 'active' AND scope = 'project'
+	      ORDER BY project_path, updated_at DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("query active project rules: %w", err)
+	}
+	defer rows.Close()
+
+	byPath := map[string][]*Rule{}
+	for rows.Next() {
+		rule, err := scanRuleFromRows(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan active project rule: %w", err)
+		}
+		byPath[rule.ProjectPath] = append(byPath[rule.ProjectPath], rule)
+	}
+	return byPath, rows.Err()
+}
+
 func buildRuleQuery(f RuleFilter) (string, []any) {
 	q := `SELECT id, content, scope, COALESCE(project_path,''), tags, COALESCE(category,''),
 	              COALESCE(trigger_context,''), confidence, status, version,
