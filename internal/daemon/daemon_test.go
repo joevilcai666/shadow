@@ -210,6 +210,41 @@ func TestOnboardingScanScopesRulesAndSelectedAgentsToCurrentProject(t *testing.T
 	}
 }
 
+func TestOnboardingScanDoesNotDuplicateImportedRules(t *testing.T) {
+	cwd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cwd, "AGENTS.md"), []byte("Use pnpm for package management."), 0644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+	dbPath := filepath.Join(t.TempDir(), "shadow.db")
+
+	for i := 0; i < 2; i++ {
+		msg := scanProject(cwd, dbPath, []CheckboxItem{{Label: "Codex"}}, nil)()
+		if _, ok := msg.(scanCompleteMsg); !ok {
+			t.Fatalf("scan %d returned %T, want scanCompleteMsg", i+1, msg)
+		}
+	}
+
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	rules, err := storage.NewRuleRepo(db).List(storage.RuleFilter{Scope: "project", ProjectPath: cwd})
+	if err != nil {
+		t.Fatalf("list rules: %v", err)
+	}
+	matches := 0
+	for _, rule := range rules {
+		if rule.Content == "Use pnpm for package management." {
+			matches++
+		}
+	}
+	if matches != 1 {
+		t.Fatalf("imported rule matches = %d, want 1. rules = %#v", matches, rules)
+	}
+}
+
 func TestSyncAdaptersRemovesDisabledAdapterBlocks(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "shadow.db")

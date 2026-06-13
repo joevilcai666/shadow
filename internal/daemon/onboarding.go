@@ -404,9 +404,10 @@ func scanProject(cwd, dbPath string, selectedAgents []CheckboxItem, detectedAgen
 				if rule.ProjectPath == "" {
 					rule.ProjectPath = cwd
 				}
-				if err := ruleRepo.Create(rule); err != nil {
+				created, err := createOnboardingRuleIfNew(ruleRepo, rule)
+				if err != nil {
 					slog.Warn("onboarding: create rule from scan", "error", err)
-				} else {
+				} else if created {
 					totalRules++
 				}
 			}
@@ -439,9 +440,10 @@ func scanProject(cwd, dbPath string, selectedAgents []CheckboxItem, detectedAgen
 				rule.Scope = "project"
 				rule.ProjectPath = cwd
 				rule.Tags = append(rule.Tags, "import:"+f)
-				if err := ruleRepo.Create(rule); err != nil {
+				created, err := createOnboardingRuleIfNew(ruleRepo, rule)
+				if err != nil {
 					slog.Warn("onboarding: create imported rule", "error", err)
-				} else {
+				} else if created {
 					totalRules++
 				}
 			}
@@ -479,6 +481,25 @@ func scanProject(cwd, dbPath string, selectedAgents []CheckboxItem, detectedAgen
 			facts:         facts,
 		}
 	}
+}
+
+func createOnboardingRuleIfNew(ruleRepo *storage.RuleRepo, rule *storage.Rule) (bool, error) {
+	existing, err := ruleRepo.List(storage.RuleFilter{
+		Scope:       rule.Scope,
+		ProjectPath: rule.ProjectPath,
+	})
+	if err != nil {
+		return false, err
+	}
+	for _, current := range existing {
+		if strings.EqualFold(strings.TrimSpace(current.Content), strings.TrimSpace(rule.Content)) {
+			return false, nil
+		}
+	}
+	if err := ruleRepo.Create(rule); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func countScanFiles(cwd string) int {

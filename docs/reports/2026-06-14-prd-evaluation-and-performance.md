@@ -101,6 +101,9 @@ and the dashboard hit-rate summary.
 - Windows IPC tests now use unique named pipe paths, eliminating fixed-name
   collisions that made the full verification suite intermittently fail with
   access-denied pipe errors.
+- Onboarding project scans now skip existing same-project rules with matching
+  content, so rerunning first-run import does not duplicate candidate memories
+  from the same native agent context file.
 
 ## Performance Changes In This Pass
 
@@ -134,6 +137,7 @@ Run after this pass:
 - `go test ./cmd/shadow -run TestFindProjectContextsDeduplicatesCurrentDirectory -count=1`
 - `go test ./internal/daemon -run TestDetectAgentsIncludesOpenClaw -count=1`
 - `go test ./internal/daemon -run TestSocketIPC -count=1`
+- `go test ./internal/daemon -run TestOnboardingScanDoesNotDuplicateImportedRules -count=1`
 - Browser smoke against `http://127.0.0.1:7878/`: dashboard rendered
   Shadow console content and browser error logs were empty.
 
